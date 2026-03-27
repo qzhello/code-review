@@ -29,6 +29,7 @@ var (
 	focus       string
 	prdFile     string
 	interactive bool
+	lang        string
 )
 
 var reviewCmd = &cobra.Command{
@@ -64,6 +65,7 @@ func init() {
 	reviewCmd.Flags().StringVar(&focus, "focus", "", "override agent focus area (e.g., security)")
 	reviewCmd.Flags().StringVar(&prdFile, "prd", "", "path to PRD/requirements document for context-aware review")
 	reviewCmd.Flags().BoolVarP(&interactive, "interactive", "i", false, "interactive TUI mode for reviewing findings")
+	reviewCmd.Flags().StringVar(&lang, "lang", "", "output language for agent findings: en, zh, ja, ko, etc. (overrides config)")
 }
 
 func runReview(cmd *cobra.Command, args []string) error {
@@ -88,6 +90,9 @@ func runReview(cmd *cobra.Command, args []string) error {
 	}
 	if focus != "" {
 		cfg.Agent.Focus = []string{focus}
+	}
+	if lang != "" {
+		cfg.Agent.Language = lang
 	}
 
 	// Load PRD content if specified
@@ -137,8 +142,23 @@ func runReview(cmd *cobra.Command, args []string) error {
 		term.PrintDiffSummary(diff)
 	}
 
-	// Step 3: Run review engine
+	// Step 3: Run review engine with progress
 	engine := review.NewEngine(cfg, prdContent)
+
+	// Set up progress bar for agent review (only in terminal, non-JSON mode)
+	if !jsonOutput && (reviewMode == "hybrid" || reviewMode == "agent-only") && cfg.Agent.Enabled {
+		chunks := len(diff.Files) // approximate chunk count
+		progress := output.NewProgress(chunks, true)
+		engine.SetProgress(func(fileName string, done bool, cached bool) {
+			if done {
+				progress.Complete(fileName, cached)
+			} else {
+				progress.Start(fileName)
+			}
+		})
+		defer progress.Finish()
+	}
+
 	result, err := engine.Run(ctx, diff, reviewMode)
 	if err != nil {
 		return fmt.Errorf("review failed: %w", err)
@@ -168,6 +188,11 @@ func runReview(cmd *cobra.Command, args []string) error {
 	// Step 5: Save to history
 	if cfg.Store.Enabled {
 		saveToHistory(ctx, cfg, reviewMode, result)
+	}
+
+	// Step 6: Next steps hints
+	if !jsonOutput {
+		printReviewHints(result, reviewMode, interactive)
 	}
 
 	// Exit code 1 if any errors
@@ -218,4 +243,36 @@ func printTUIActions(items []tui.FindingItem) {
 
 	fmt.Printf("\nReview complete: %d accepted, %d dismissed, %d fixed, %d pending\n",
 		accepted, dismissed, fixed, pending)
+}
+
+func printReviewHints(result *review.Result, reviewMode string, isInteractive bool) {
+	hasFindings := len(result.Findings) > 0
+	hasErrors := result.Stats.Errors > 0
+
+	if !hasFindings {
+		output.Hint(
+			"No issues found. You're good to commit!",
+			"Run "+output.HintCmd("cr hook install")+" to auto-review on every commit.",
+		)
+		return
+	}
+
+	var hints []string
+
+	if hasErrors {
+		hints = append(hints, "Fix the errors above, then run "+output.HintCmd("cr review --staged")+" again.")
+	}
+
+	if !isInteractive {
+		hints = append(hints, "Run "+output.HintCmd("cr review -i")+" for interactive mode (accept/dismiss findings).")
+	}
+
+	if reviewMode == "rules-only" {
+		hints = append(hints, "Run "+output.HintCmd("cr review")+" (hybrid mode) for AI-powered deeper review.")
+	}
+
+	hints = append(hints, "Run "+output.HintCmd("cr review --json")+" to get machine-readable output for CI.")
+	hints = append(hints, "Run "+output.HintCmd("cr history list")+" to view past reviews.")
+
+	output.Hint(hints...)
 }

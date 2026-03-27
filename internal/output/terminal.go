@@ -76,7 +76,7 @@ func (t *Terminal) PrintResult(result *review.Result, elapsed time.Duration) {
 		return
 	}
 
-	bold.Printf("Review Findings (%d)\n\n", len(result.Findings))
+	bold.Printf("\nReview Findings (%d)\n\n", len(result.Findings))
 
 	for _, f := range result.Findings {
 		var sevColor *color.Color

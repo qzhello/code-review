@@ -52,6 +52,14 @@ func BuildSystemPrompt(cfg model.AgentConfig, existingFindings []model.Finding, 
 		}
 	}
 
+	// Output language
+	lang := cfg.Language
+	if lang != "" && lang != "en" {
+		langName := expandLanguageCode(lang)
+		sb.WriteString(fmt.Sprintf("\nIMPORTANT: Write all \"message\" and \"suggestion\" fields in %s (%s). "+
+			"Keep JSON keys, severity values, and file paths in English. Only the human-readable text should be in %s.\n", langName, lang, langName))
+	}
+
 	// Response format
 	sb.WriteString(`
 Respond with a JSON object containing a "findings" array. Each finding must have:
@@ -81,3 +89,25 @@ const defaultPersona = `You are a senior software engineer performing code revie
 You have deep expertise in identifying bugs, security vulnerabilities, and performance issues.
 You are thorough but pragmatic — only flag issues that genuinely matter.
 Be concise and specific in your feedback.`
+
+// expandLanguageCode maps language codes to full names.
+func expandLanguageCode(code string) string {
+	languages := map[string]string{
+		"zh":    "Chinese (中文)",
+		"zh-CN": "Simplified Chinese (简体中文)",
+		"zh-TW": "Traditional Chinese (繁體中文)",
+		"ja":    "Japanese (日本語)",
+		"ko":    "Korean (한국어)",
+		"es":    "Spanish (Español)",
+		"fr":    "French (Français)",
+		"de":    "German (Deutsch)",
+		"pt":    "Portuguese (Português)",
+		"ru":    "Russian (Русский)",
+		"ar":    "Arabic (العربية)",
+		"it":    "Italian (Italiano)",
+	}
+	if name, ok := languages[code]; ok {
+		return name
+	}
+	return code
+}

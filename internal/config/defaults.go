@@ -35,6 +35,7 @@ func DefaultConfig() *model.Config {
 Focus on bugs, security issues, and performance problems.
 Do NOT comment on code style or formatting.
 Be concise. Only flag real issues with clear explanations.`,
+			Language: "en",
 		},
 		Noise: model.NoiseConfig{
 			MinSeverity:       "info",
@@ -93,6 +94,7 @@ agent:
   ignore:
     - style
     - naming
+  language: en                # output language for findings: en, zh, zh-CN, ja, ko, es, fr, de, etc.
   persona: |
     You are a senior software engineer performing code review.
     Focus on bugs, security issues, and performance problems.

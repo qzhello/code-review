@@ -11,6 +11,7 @@ import (
 
 	"github.com/qzhello/code-review/internal/git"
 	"github.com/qzhello/code-review/internal/hooks"
+	"github.com/qzhello/code-review/internal/output"
 )
 
 var defaultHookTypes = []string{"pre-commit", "pre-push"}
@@ -49,8 +50,12 @@ Existing hooks are backed up before overwriting.`,
 		green.Println("\nHooks installed successfully!")
 		fmt.Println("  pre-commit: blocks on errors (rules-only, fast)")
 		fmt.Println("  pre-push:   blocks on warnings and errors")
-		fmt.Println("\n  Use 'git commit --no-verify' to bypass.")
 
+		output.Hint(
+			"Hooks are active. Try "+output.HintCmd("git commit")+" to see it in action.",
+			"Run "+output.HintCmd("cr hook status")+" to check hook status.",
+			"Use "+output.HintCmd("git commit --no-verify")+" to bypass the hook.",
+		)
 		return nil
 	},
 }

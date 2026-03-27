@@ -17,11 +17,17 @@ import (
 type Engine struct {
 	cfg        *model.Config
 	prdContent string
+	onProgress agent.ProgressFunc
 }
 
 // NewEngine creates a new review engine.
 func NewEngine(cfg *model.Config, prdContent string) *Engine {
 	return &Engine{cfg: cfg, prdContent: prdContent}
+}
+
+// SetProgress sets the progress callback for agent review.
+func (e *Engine) SetProgress(fn agent.ProgressFunc) {
+	e.onProgress = fn
 }
 
 // Result holds the combined review output.
@@ -144,6 +150,9 @@ func (e *Engine) runAgent(ctx context.Context, diff *model.DiffResult, existingF
 	reviewer, err := agent.NewReviewer(e.cfg.Agent, e.prdContent, c)
 	if err != nil {
 		return nil, err
+	}
+	if e.onProgress != nil {
+		reviewer.SetProgress(e.onProgress)
 	}
 	return reviewer.Review(ctx, diff, existingFindings)
 }

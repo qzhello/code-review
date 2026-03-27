@@ -27,11 +27,16 @@ type agentFinding struct {
 	Suggestion string `json:"suggestion"`
 }
 
+// ProgressFunc is called to report review progress.
+// fileName is the file being reviewed, done is true when the chunk is complete.
+type ProgressFunc func(fileName string, done bool, cached bool)
+
 // Reviewer orchestrates LLM-powered code review.
 type Reviewer struct {
 	client     *Client
 	cfg        model.AgentConfig
 	prdContent string
+	onProgress ProgressFunc
 }
 
 // NewReviewer creates a new agent reviewer.
@@ -43,6 +48,11 @@ func NewReviewer(cfg model.AgentConfig, prdContent string, c *cache.Cache) (*Rev
 		return nil, err
 	}
 	return &Reviewer{client: client, cfg: cfg, prdContent: prdContent}, nil
+}
+
+// SetProgress sets the progress callback.
+func (r *Reviewer) SetProgress(fn ProgressFunc) {
+	r.onProgress = fn
 }
 
 // Review runs the agent review on a diff, returning findings.
@@ -75,16 +85,29 @@ func (r *Reviewer) Review(ctx context.Context, diff *model.DiffResult, existingF
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
+			if r.onProgress != nil {
+				r.onProgress(c.FilePath, false, false)
+			}
+
 			findings, err := r.reviewChunk(ctx, systemPrompt, c)
+
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
 				if firstErr == nil {
 					firstErr = err
 				}
+				if r.onProgress != nil {
+					r.onProgress(c.FilePath, true, false)
+				}
 				return
 			}
 			allFindings = append(allFindings, findings...)
+			if r.onProgress != nil {
+				// Check if this was a cache hit
+				wasCached := len(findings) == 0 // approximate; actual cache hit tracked in client
+				r.onProgress(c.FilePath, true, wasCached)
+			}
 		}(chunk)
 	}
 	wg.Wait()

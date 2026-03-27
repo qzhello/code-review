@@ -10,6 +10,7 @@ import (
 
 	"github.com/qzhello/code-review/internal/config"
 	"github.com/qzhello/code-review/internal/model"
+	"github.com/qzhello/code-review/internal/output"
 	"github.com/qzhello/code-review/internal/rules"
 )
 
@@ -67,6 +68,11 @@ var rulesListCmd = &cobra.Command{
 			fmt.Println()
 		}
 
+		output.Hint(
+			"Run "+output.HintCmd("cr rules import <file>")+" to add rules from a YAML/JSON file.",
+			"Run "+output.HintCmd("cr rules export --format json")+" to share your rules.",
+			"Run "+output.HintCmd("cr review --staged --mode rules-only")+" to test rules against staged changes.",
+		)
 		return nil
 	},
 }
@@ -252,6 +258,11 @@ func runRulesImport(cmd *cobra.Command, args []string) error {
 		yellow.Printf("  %d rule ID conflicts detected (imported rules take precedence by load order)\n", conflicts)
 	}
 
+	output.Hint(
+		"Run "+output.HintCmd("cr rules list")+" to see all active rules.",
+		"Run "+output.HintCmd("cr rules validate")+" to check rule syntax.",
+		"Run "+output.HintCmd("cr review --staged --mode rules-only")+" to test the imported rules.",
+	)
 	return nil
 }
 

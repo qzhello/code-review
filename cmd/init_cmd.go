@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/qzhello/code-review/internal/config"
+	"github.com/qzhello/code-review/internal/output"
 )
 
 var forceInit bool
@@ -61,6 +62,13 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println("\ncr initialized. Edit .cr/config.yaml to customize.")
+
+	output.Hint(
+		"Run "+output.HintCmd("cr review --staged")+" to review your staged changes.",
+		"Run "+output.HintCmd("cr rules list")+" to see all available rules.",
+		"Run "+output.HintCmd("cr hook install")+" to auto-review on every commit.",
+		"Edit "+output.HintCmd(".cr/config.yaml")+" to configure the AI agent, rules, and more.",
+	)
 	return nil
 }
 

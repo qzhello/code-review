@@ -9,6 +9,7 @@ import (
 
 	"github.com/qzhello/code-review/internal/config"
 	"github.com/qzhello/code-review/internal/model"
+	"github.com/qzhello/code-review/internal/output"
 	"github.com/qzhello/code-review/internal/review"
 	"github.com/qzhello/code-review/internal/store"
 )
@@ -69,7 +70,12 @@ var historyListCmd = &cobra.Command{
 				findingsStr,
 			)
 		}
+		fmt.Println()
 
+		output.Hint(
+			"Run "+output.HintCmd("cr history show <id>")+" to see findings from a specific review.",
+			"Run "+output.HintCmd("cr stats")+" to see LLM usage and cost statistics.",
+		)
 		return nil
 	},
 }

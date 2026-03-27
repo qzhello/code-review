@@ -42,6 +42,7 @@ type AgentConfig struct {
 	Focus               []string      `yaml:"focus" mapstructure:"focus"`
 	Ignore              []string      `yaml:"ignore" mapstructure:"ignore"`
 	Persona             string        `yaml:"persona" mapstructure:"persona"`
+	Language            string        `yaml:"language" mapstructure:"language"` // output language: en, zh, ja, etc.
 }
 
 // NoiseConfig controls noise reduction.
