@@ -1,0 +1,32 @@
+rules:
+  - id: sec-hardcoded-secret
+    severity: error
+    description: "Possible hardcoded secret or API key"
+    pattern: '(?i)(api[_-]?key|secret[_-]?key|password|token|credential)\s*[:=]\s*["\x27][A-Za-z0-9+/=_-]{8,}'
+    scope: added
+
+  - id: sec-private-key
+    severity: error
+    description: "Private key material detected"
+    pattern: '-----BEGIN\s+(RSA |EC |DSA )?PRIVATE KEY-----'
+    scope: added
+
+  - id: sec-sql-injection
+    severity: error
+    description: "Possible SQL injection — use parameterized queries"
+    pattern: '(Exec|Query|QueryRow)\(\s*.*\+\s*'
+    scope: added
+
+  - id: sec-dangerous-sql
+    severity: error
+    description: "Dangerous SQL operation — DROP/TRUNCATE should be reviewed carefully"
+    file: "*.sql"
+    pattern: '(?i)(DROP\s+TABLE|TRUNCATE\s+TABLE|DROP\s+DATABASE)'
+    scope: added
+
+  - id: sec-unsafe-pointer
+    severity: warn
+    description: "unsafe.Pointer usage — ensure this is necessary and correct"
+    file: "*.go"
+    pattern: 'unsafe\.Pointer'
+    scope: added

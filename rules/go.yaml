@@ -1,0 +1,35 @@
+rules:
+  - id: go-debug-print
+    severity: warn
+    description: "Debug print statement — remove before merge"
+    file: "*.go"
+    pattern: 'fmt\.Print(ln|f)?\('
+    scope: added
+
+  - id: go-panic
+    severity: error
+    description: "Direct panic() call — use error returns instead"
+    file: "*.go"
+    pattern: '\bpanic\('
+    scope: added
+
+  - id: go-os-exit
+    severity: warn
+    description: "os.Exit() called outside main — may skip deferred cleanup"
+    file: "*.go"
+    pattern: 'os\.Exit\('
+    scope: added
+
+  - id: go-empty-error-check
+    severity: warn
+    description: "Error checked but not handled (empty if block)"
+    file: "*.go"
+    pattern: 'if\s+err\s*!=\s*nil\s*\{\s*\}'
+    scope: added
+
+  - id: go-todo
+    severity: info
+    description: "New TODO/FIXME added — consider linking an issue"
+    file: "*.go"
+    pattern: '//\s*(TODO|FIXME|HACK|XXX)\b'
+    scope: added

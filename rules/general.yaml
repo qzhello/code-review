@@ -1,0 +1,32 @@
+rules:
+  - id: gen-large-diff
+    severity: info
+    description: "Large diff — consider breaking into smaller changes"
+    max_changed_lines: 500
+
+  - id: gen-console-log
+    severity: warn
+    description: "console.log() should be removed before merge"
+    file: "*.{js,ts,jsx,tsx}"
+    pattern: 'console\.(log|debug|info)\('
+    scope: added
+
+  - id: gen-debugger
+    severity: error
+    description: "Debugger statement left in code"
+    file: "*.{js,ts,jsx,tsx,py}"
+    pattern: '\bdebugger\b'
+    scope: added
+
+  - id: gen-fixme
+    severity: info
+    description: "FIXME comment added"
+    pattern: '(FIXME|XXX|HACK)\b'
+    scope: added
+
+  - id: gen-env-file
+    severity: error
+    description: "Environment file should not be committed"
+    file: ".env*"
+    pattern: '.'
+    scope: added
