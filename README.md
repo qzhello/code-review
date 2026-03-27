@@ -21,7 +21,7 @@ A terminal-based code review tool that combines **deterministic rule-based analy
 ### npm (recommended)
 
 ```bash
-npm install -g @kizuhiko/cr
+npm install -g @kizuhiko/cr --registry https://registry.npmjs.org
 ```
 
 ### Build from source
