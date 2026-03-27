@@ -5,21 +5,21 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/quzhihao/code-review/internal/model"
+	"github.com/qzhello/code-review/internal/model"
 )
 
 // ReviewRecord represents a stored review.
 type ReviewRecord struct {
-	ID           int
-	Repo         string
-	Branch       string
-	CommitHash   string
-	Mode         string
-	Findings     []model.Finding
-	Errors       int
-	Warnings     int
-	Infos        int
-	CreatedAt    time.Time
+	ID         int
+	Repo       string
+	Branch     string
+	CommitHash string
+	Mode       string
+	Findings   []model.Finding
+	Errors     int
+	Warnings   int
+	Infos      int
+	CreatedAt  time.Time
 }
 
 // SaveReview stores a review result in the database.

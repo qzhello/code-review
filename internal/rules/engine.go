@@ -3,7 +3,7 @@ package rules
 import (
 	"fmt"
 
-	"github.com/quzhihao/code-review/internal/model"
+	"github.com/qzhello/code-review/internal/model"
 )
 
 // Engine evaluates rules against a diff result.

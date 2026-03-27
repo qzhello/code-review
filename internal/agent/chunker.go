@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/quzhihao/code-review/internal/model"
+	"github.com/qzhello/code-review/internal/model"
 )
 
 const (
@@ -14,8 +14,8 @@ const (
 
 // Chunk represents a piece of diff sent to the agent.
 type Chunk struct {
-	FilePath string
-	Content  string
+	FilePath  string
+	Content   string
 	StartLine int
 }
 

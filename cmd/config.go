@@ -8,7 +8,7 @@ import (
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
-	"github.com/quzhihao/code-review/internal/config"
+	"github.com/qzhello/code-review/internal/config"
 )
 
 var configCmd = &cobra.Command{

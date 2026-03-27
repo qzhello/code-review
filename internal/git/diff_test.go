@@ -3,7 +3,7 @@ package git
 import (
 	"testing"
 
-	"github.com/quzhihao/code-review/internal/model"
+	"github.com/qzhello/code-review/internal/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

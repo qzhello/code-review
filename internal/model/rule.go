@@ -9,20 +9,20 @@ const (
 	ScopeAll     Scope = "all"
 )
 
-// Rule defines a single review rule loaded from YAML.
+// Rule defines a single review rule loaded from YAML or JSON.
 type Rule struct {
-	ID              string   `yaml:"id"`
-	Severity        string   `yaml:"severity"`
-	Description     string   `yaml:"description"`
-	File            string   `yaml:"file,omitempty"`    // glob pattern
-	Pattern         string   `yaml:"pattern,omitempty"` // regex
-	Scope           Scope    `yaml:"scope,omitempty"`   // added | removed | all (default: added)
-	MaxChangedLines int      `yaml:"max_changed_lines,omitempty"` // structural rule
-	Enabled         bool     `yaml:"-"` // resolved at runtime
-	Source          string   `yaml:"-"` // file path where rule was loaded from
+	ID              string `yaml:"id" json:"id"`
+	Severity        string `yaml:"severity" json:"severity"`
+	Description     string `yaml:"description" json:"description"`
+	File            string `yaml:"file,omitempty" json:"file,omitempty"`                           // glob pattern
+	Pattern         string `yaml:"pattern,omitempty" json:"pattern,omitempty"`                     // regex
+	Scope           Scope  `yaml:"scope,omitempty" json:"scope,omitempty"`                         // added | removed | all (default: added)
+	MaxChangedLines int    `yaml:"max_changed_lines,omitempty" json:"max_changed_lines,omitempty"` // structural rule
+	Enabled         bool   `yaml:"-" json:"-"`                                                     // resolved at runtime
+	Source          string `yaml:"-" json:"-"`                                                     // file path where rule was loaded from
 }
 
-// RuleFile represents a YAML file containing rules.
+// RuleFile represents a file containing rules (YAML or JSON).
 type RuleFile struct {
-	Rules []Rule `yaml:"rules"`
+	Rules []Rule `yaml:"rules" json:"rules"`
 }

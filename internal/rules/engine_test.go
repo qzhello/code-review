@@ -6,19 +6,19 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/quzhihao/code-review/internal/model"
+	"github.com/qzhello/code-review/internal/model"
 )
 
 func TestEngine_PatternRule(t *testing.T) {
 	rules := []model.Rule{
 		{
-			ID:       "no-println",
-			Severity: "warn",
+			ID:          "no-println",
+			Severity:    "warn",
 			Description: "Debug print detected",
-			File:     "*.go",
-			Pattern:  `fmt\.Println`,
-			Scope:    model.ScopeAdded,
-			Enabled:  true,
+			File:        "*.go",
+			Pattern:     `fmt\.Println`,
+			Scope:       model.ScopeAdded,
+			Enabled:     true,
 		},
 	}
 
@@ -56,13 +56,13 @@ func TestEngine_PatternRule(t *testing.T) {
 func TestEngine_PatternRule_NoMatch(t *testing.T) {
 	rules := []model.Rule{
 		{
-			ID:       "no-println",
-			Severity: "warn",
+			ID:          "no-println",
+			Severity:    "warn",
 			Description: "Debug print detected",
-			File:     "*.go",
-			Pattern:  `fmt\.Println`,
-			Scope:    model.ScopeAdded,
-			Enabled:  true,
+			File:        "*.go",
+			Pattern:     `fmt\.Println`,
+			Scope:       model.ScopeAdded,
+			Enabled:     true,
 		},
 	}
 
@@ -92,13 +92,13 @@ func TestEngine_PatternRule_NoMatch(t *testing.T) {
 func TestEngine_FileGlob(t *testing.T) {
 	rules := []model.Rule{
 		{
-			ID:       "no-console",
-			Severity: "warn",
+			ID:          "no-console",
+			Severity:    "warn",
 			Description: "console.log detected",
-			File:     "*.js",
-			Pattern:  `console\.log`,
-			Scope:    model.ScopeAdded,
-			Enabled:  true,
+			File:        "*.js",
+			Pattern:     `console\.log`,
+			Scope:       model.ScopeAdded,
+			Enabled:     true,
 		},
 	}
 
@@ -161,12 +161,12 @@ func TestEngine_StructuralRule(t *testing.T) {
 func TestEngine_ScopeRemoved(t *testing.T) {
 	rules := []model.Rule{
 		{
-			ID:       "removed-check",
-			Severity: "info",
+			ID:          "removed-check",
+			Severity:    "info",
 			Description: "Important code removed",
-			Pattern:  `IMPORTANT`,
-			Scope:    model.ScopeRemoved,
-			Enabled:  true,
+			Pattern:     `IMPORTANT`,
+			Scope:       model.ScopeRemoved,
+			Enabled:     true,
 		},
 	}
 

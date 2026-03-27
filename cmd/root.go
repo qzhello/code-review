@@ -35,6 +35,8 @@ func init() {
 	rootCmd.AddCommand(rulesCmd)
 	rootCmd.AddCommand(configCmd)
 	rootCmd.AddCommand(historyCmd)
+	rootCmd.AddCommand(hookCmd)
+	rootCmd.AddCommand(statsCmd)
 	rootCmd.AddCommand(versionCmd)
 }
 

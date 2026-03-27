@@ -2,19 +2,23 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 
-	"github.com/quzhihao/code-review/internal/config"
-	"github.com/quzhihao/code-review/internal/rules"
+	"github.com/qzhello/code-review/internal/config"
+	"github.com/qzhello/code-review/internal/model"
+	"github.com/qzhello/code-review/internal/rules"
 )
 
 var rulesCmd = &cobra.Command{
 	Use:   "rules",
 	Short: "Manage review rules",
-	Long:  `List, validate, enable, or disable review rules.`,
+	Long: `List, validate, import, export, enable, or disable review rules.
+
+Supports both YAML and JSON rule files.`,
 }
 
 var rulesListCmd = &cobra.Command{
@@ -92,7 +96,7 @@ func printRule(id, severity, description string, enabled bool, source string, gr
 
 var rulesValidateCmd = &cobra.Command{
 	Use:   "validate [path]",
-	Short: "Validate rule YAML syntax",
+	Short: "Validate rule files (YAML or JSON)",
 	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		path := ".cr/rules/"
@@ -102,12 +106,8 @@ var rulesValidateCmd = &cobra.Command{
 
 		green := color.New(color.FgGreen)
 
-		entries, _ := filepath.Glob(filepath.Join(path, "*.yaml"))
-		ymlEntries, _ := filepath.Glob(filepath.Join(path, "*.yml"))
-		entries = append(entries, ymlEntries...)
-
+		entries := collectRuleFiles(path)
 		if len(entries) == 0 {
-			// Maybe it's a single file
 			entries = []string{path}
 		}
 
@@ -128,6 +128,37 @@ var rulesValidateCmd = &cobra.Command{
 		return nil
 	},
 }
+
+var rulesImportCmd = &cobra.Command{
+	Use:   "import <file> [target-dir]",
+	Short: "Import rules from a YAML or JSON file into the project",
+	Long: `Import rules from an external file into the project's rules directory.
+
+Supports YAML (.yaml, .yml) and JSON (.json) files.
+Rules are validated before import. Duplicate rule IDs are reported.
+
+Examples:
+  cr rules import team-rules.yaml            # import into .cr/rules/
+  cr rules import security.json .cr/rules/   # import JSON rules
+  cr rules import ~/shared/rules.yaml        # import from another location`,
+	Args: cobra.RangeArgs(1, 2),
+	RunE: runRulesImport,
+}
+
+var rulesExportCmd = &cobra.Command{
+	Use:   "export [--format json|yaml]",
+	Short: "Export all active rules to stdout",
+	Long: `Export all active rules (builtin + custom) to stdout in YAML or JSON format.
+Useful for sharing rules with teammates or backing up configurations.
+
+Examples:
+  cr rules export                    # export as YAML (default)
+  cr rules export --format json      # export as JSON
+  cr rules export --format json > rules.json  # save to file`,
+	RunE: runRulesExport,
+}
+
+var exportFormat string
 
 var rulesDisableCmd = &cobra.Command{
 	Use:   "disable [rule-id]",
@@ -151,8 +182,132 @@ var rulesEnableCmd = &cobra.Command{
 }
 
 func init() {
+	rulesExportCmd.Flags().StringVar(&exportFormat, "format", "yaml", "output format: yaml or json")
+
 	rulesCmd.AddCommand(rulesListCmd)
 	rulesCmd.AddCommand(rulesValidateCmd)
+	rulesCmd.AddCommand(rulesImportCmd)
+	rulesCmd.AddCommand(rulesExportCmd)
 	rulesCmd.AddCommand(rulesDisableCmd)
 	rulesCmd.AddCommand(rulesEnableCmd)
+}
+
+func runRulesImport(cmd *cobra.Command, args []string) error {
+	srcPath := args[0]
+	targetDir := ".cr/rules/"
+	if len(args) > 1 {
+		targetDir = args[1]
+	}
+
+	// Validate source file first
+	if err := rules.ValidateFile(srcPath); err != nil {
+		return fmt.Errorf("validation failed: %w", err)
+	}
+
+	// Load source rules to check for duplicates
+	srcRules, err := rules.LoadFromFile(srcPath, map[string]bool{})
+	if err != nil {
+		return err
+	}
+
+	// Load existing rules to detect conflicts
+	cfg, err := config.Load(cfgFile)
+	if err != nil {
+		return err
+	}
+	existingRules, _ := rules.LoadFromPaths(cfg.Rules.Paths, nil)
+	existingIDs := make(map[string]string) // id -> source
+	for _, r := range existingRules {
+		existingIDs[r.ID] = r.Source
+	}
+
+	// Report conflicts
+	green := color.New(color.FgGreen)
+	yellow := color.New(color.FgYellow)
+	conflicts := 0
+	for _, r := range srcRules {
+		if src, exists := existingIDs[r.ID]; exists {
+			yellow.Printf("  ! Rule %q already exists in %s (will be overridden by import)\n", r.ID, filepath.Base(src))
+			conflicts++
+		}
+	}
+
+	// Copy file to target directory
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		return fmt.Errorf("failed to create target directory: %w", err)
+	}
+
+	destPath := filepath.Join(targetDir, filepath.Base(srcPath))
+	data, err := os.ReadFile(srcPath)
+	if err != nil {
+		return err
+	}
+
+	if err := os.WriteFile(destPath, data, 0o644); err != nil {
+		return fmt.Errorf("failed to write %s: %w", destPath, err)
+	}
+
+	green.Printf("  Imported %d rules from %s → %s\n", len(srcRules), srcPath, destPath)
+	if conflicts > 0 {
+		yellow.Printf("  %d rule ID conflicts detected (imported rules take precedence by load order)\n", conflicts)
+	}
+
+	return nil
+}
+
+func runRulesExport(cmd *cobra.Command, args []string) error {
+	cfg, err := config.Load(cfgFile)
+	if err != nil {
+		return err
+	}
+
+	disabledSet := make(map[string]bool)
+	for _, id := range cfg.Rules.Disabled {
+		disabledSet[id] = true
+	}
+
+	var allRules []model.Rule
+
+	if cfg.Rules.Builtin {
+		builtinRules, err := rules.LoadBuiltin(disabledSet)
+		if err != nil {
+			return err
+		}
+		allRules = append(allRules, builtinRules...)
+	}
+
+	customRules, err := rules.LoadFromPaths(cfg.Rules.Paths, cfg.Rules.Disabled)
+	if err != nil {
+		return err
+	}
+	allRules = append(allRules, customRules...)
+
+	var data []byte
+	switch exportFormat {
+	case "json":
+		data, err = rules.ExportToJSON(allRules)
+	default:
+		data, err = rules.ExportToYAML(allRules)
+	}
+	if err != nil {
+		return fmt.Errorf("failed to export: %w", err)
+	}
+
+	fmt.Print(string(data))
+	return nil
+}
+
+// collectRuleFiles finds all .yaml, .yml, and .json files in a directory.
+func collectRuleFiles(path string) []string {
+	info, err := os.Stat(path)
+	if err != nil || !info.IsDir() {
+		return nil
+	}
+
+	var entries []string
+	for _, pattern := range []string{"*.yaml", "*.yml", "*.json"} {
+		matches, _ := filepath.Glob(filepath.Join(path, pattern))
+		entries = append(entries, matches...)
+	}
+	return entries
 }

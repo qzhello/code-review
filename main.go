@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/quzhihao/code-review/cmd"
+	"github.com/qzhello/code-review/cmd"
 )
 
 func main() {

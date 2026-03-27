@@ -8,7 +8,7 @@ import (
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 
-	"github.com/quzhihao/code-review/internal/config"
+	"github.com/qzhello/code-review/internal/config"
 )
 
 var forceInit bool
@@ -37,7 +37,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 
 	files := map[string]string{
-		".cr/config.yaml": config.DefaultConfigYAML,
+		".cr/config.yaml":       config.DefaultConfigYAML,
 		".cr/rules/custom.yaml": defaultCustomRules,
 	}
 

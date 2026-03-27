@@ -6,7 +6,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/quzhihao/code-review/internal/model"
+	"github.com/qzhello/code-review/internal/cache"
+	"github.com/qzhello/code-review/internal/model"
 )
 
 // agentResponse is the expected JSON response from the LLM.
@@ -33,8 +34,9 @@ type Reviewer struct {
 
 // NewReviewer creates a new agent reviewer.
 // prdContent is optional PRD/requirements document for additional review context.
-func NewReviewer(cfg model.AgentConfig, prdContent string) (*Reviewer, error) {
-	client, err := NewClient(cfg)
+// c is optional cache for caching LLM responses.
+func NewReviewer(cfg model.AgentConfig, prdContent string, c *cache.Cache) (*Reviewer, error) {
+	client, err := NewClient(cfg, c)
 	if err != nil {
 		return nil, err
 	}
@@ -98,12 +100,12 @@ func (r *Reviewer) Review(ctx context.Context, diff *model.DiffResult, existingF
 func (r *Reviewer) reviewChunk(ctx context.Context, systemPrompt string, chunk Chunk) ([]model.Finding, error) {
 	userMsg := BuildUserMessage(chunk)
 
-	response, err := r.client.ChatCompletion(ctx, systemPrompt, userMsg)
+	result, err := r.client.ChatCompletion(ctx, systemPrompt, userMsg)
 	if err != nil {
 		return nil, fmt.Errorf("agent review failed for %s: %w", chunk.FilePath, err)
 	}
 
-	return parseAgentResponse(response, chunk.FilePath)
+	return parseAgentResponse(result.Content, chunk.FilePath)
 }
 
 func parseAgentResponse(response string, defaultFile string) ([]model.Finding, error) {

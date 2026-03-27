@@ -7,10 +7,10 @@ import (
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 
-	"github.com/quzhihao/code-review/internal/config"
-	"github.com/quzhihao/code-review/internal/model"
-	"github.com/quzhihao/code-review/internal/review"
-	"github.com/quzhihao/code-review/internal/store"
+	"github.com/qzhello/code-review/internal/config"
+	"github.com/qzhello/code-review/internal/model"
+	"github.com/qzhello/code-review/internal/review"
+	"github.com/qzhello/code-review/internal/store"
 )
 
 var historyCmd = &cobra.Command{

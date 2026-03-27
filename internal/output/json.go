@@ -6,7 +6,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/quzhihao/code-review/internal/review"
+	"github.com/qzhello/code-review/internal/review"
 )
 
 // JSONOutput represents the JSON output structure.

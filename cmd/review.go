@@ -8,12 +8,15 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/quzhihao/code-review/internal/config"
-	"github.com/quzhihao/code-review/internal/git"
-	"github.com/quzhihao/code-review/internal/model"
-	"github.com/quzhihao/code-review/internal/output"
-	"github.com/quzhihao/code-review/internal/review"
-	"github.com/quzhihao/code-review/internal/store"
+	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/qzhello/code-review/internal/config"
+	"github.com/qzhello/code-review/internal/git"
+	"github.com/qzhello/code-review/internal/model"
+	"github.com/qzhello/code-review/internal/output"
+	"github.com/qzhello/code-review/internal/review"
+	"github.com/qzhello/code-review/internal/store"
+	"github.com/qzhello/code-review/internal/tui"
 )
 
 var (
@@ -25,6 +28,7 @@ var (
 	jsonOutput  bool
 	focus       string
 	prdFile     string
+	interactive bool
 )
 
 var reviewCmd = &cobra.Command{
@@ -59,6 +63,7 @@ func init() {
 	reviewCmd.Flags().BoolVar(&jsonOutput, "json", false, "output as JSON")
 	reviewCmd.Flags().StringVar(&focus, "focus", "", "override agent focus area (e.g., security)")
 	reviewCmd.Flags().StringVar(&prdFile, "prd", "", "path to PRD/requirements document for context-aware review")
+	reviewCmd.Flags().BoolVarP(&interactive, "interactive", "i", false, "interactive TUI mode for reviewing findings")
 }
 
 func runReview(cmd *cobra.Command, args []string) error {
@@ -141,7 +146,20 @@ func runReview(cmd *cobra.Command, args []string) error {
 
 	// Step 4: Output
 	elapsed := time.Since(start)
-	if jsonOutput {
+	if interactive && len(result.Findings) > 0 {
+		// Interactive TUI mode
+		tuiModel := tui.NewModel(result, diff)
+		p := tea.NewProgram(tuiModel, tea.WithAltScreen())
+		finalModel, err := p.Run()
+		if err != nil {
+			return fmt.Errorf("TUI error: %w", err)
+		}
+
+		// Print summary of user actions
+		if fm, ok := finalModel.(tui.Model); ok {
+			printTUIActions(fm.Findings())
+		}
+	} else if jsonOutput {
 		output.PrintJSON(result, elapsed)
 	} else {
 		term.PrintResult(result, elapsed)
@@ -181,4 +199,23 @@ func saveToHistory(ctx context.Context, cfg *model.Config, reviewMode string, re
 	if err != nil && verbose {
 		fmt.Fprintf(os.Stderr, "Warning: failed to save review: %s\n", err)
 	}
+}
+
+func printTUIActions(items []tui.FindingItem) {
+	accepted, dismissed, fixed, pending := 0, 0, 0, 0
+	for _, item := range items {
+		switch item.Action {
+		case tui.ActionAccepted:
+			accepted++
+		case tui.ActionDismissed:
+			dismissed++
+		case tui.ActionFixed:
+			fixed++
+		default:
+			pending++
+		}
+	}
+
+	fmt.Printf("\nReview complete: %d accepted, %d dismissed, %d fixed, %d pending\n",
+		accepted, dismissed, fixed, pending)
 }

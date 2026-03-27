@@ -1,0 +1,36 @@
+{
+  "rules": [
+    {
+      "id": "py-breakpoint",
+      "severity": "error",
+      "description": "Debugger breakpoint left in code",
+      "file": "*.py",
+      "pattern": "\\b(breakpoint|pdb\\.set_trace|ipdb\\.set_trace)\\(",
+      "scope": "added"
+    },
+    {
+      "id": "py-print-debug",
+      "severity": "warn",
+      "description": "Print statement used for debugging — use logging instead",
+      "file": "*.py",
+      "pattern": "^\\s*print\\(",
+      "scope": "added"
+    },
+    {
+      "id": "py-bare-except",
+      "severity": "warn",
+      "description": "Bare except clause — catch specific exceptions instead",
+      "file": "*.py",
+      "pattern": "except\\s*:",
+      "scope": "added"
+    },
+    {
+      "id": "py-todo",
+      "severity": "info",
+      "description": "New TODO/FIXME added",
+      "file": "*.py",
+      "pattern": "#\\s*(TODO|FIXME|HACK|XXX)\\b",
+      "scope": "added"
+    }
+  ]
+}

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/quzhihao/code-review/internal/model"
+	"github.com/qzhello/code-review/internal/model"
 )
 
 // BuildSystemPrompt constructs the system prompt for the agent.

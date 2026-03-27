@@ -6,8 +6,8 @@ import (
 
 	"github.com/fatih/color"
 
-	"github.com/quzhihao/code-review/internal/model"
-	"github.com/quzhihao/code-review/internal/review"
+	"github.com/qzhello/code-review/internal/model"
+	"github.com/qzhello/code-review/internal/review"
 )
 
 // Terminal renders review results to the terminal with colors.

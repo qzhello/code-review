@@ -6,11 +6,14 @@ import (
 	"os"
 	"sort"
 
+	"time"
+
 	"golang.org/x/sync/errgroup"
 
-	"github.com/quzhihao/code-review/internal/agent"
-	"github.com/quzhihao/code-review/internal/model"
-	"github.com/quzhihao/code-review/internal/rules"
+	"github.com/qzhello/code-review/internal/agent"
+	"github.com/qzhello/code-review/internal/cache"
+	"github.com/qzhello/code-review/internal/model"
+	"github.com/qzhello/code-review/internal/rules"
 )
 
 // Engine orchestrates both rule-based and agent-based review.
@@ -139,7 +142,19 @@ func (e *Engine) runRules(diff *model.DiffResult) ([]model.Finding, error) {
 }
 
 func (e *Engine) runAgent(ctx context.Context, diff *model.DiffResult, existingFindings []model.Finding) ([]model.Finding, error) {
-	reviewer, err := agent.NewReviewer(e.cfg.Agent, e.prdContent)
+	// Open cache if store is enabled
+	var c *cache.Cache
+	if e.cfg.Store.Enabled {
+		var err error
+		c, err = cache.New(e.cfg.Store.Path, 24*time.Hour)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to open cache: %s\n", err)
+		} else {
+			defer c.Close()
+		}
+	}
+
+	reviewer, err := agent.NewReviewer(e.cfg.Agent, e.prdContent, c)
 	if err != nil {
 		return nil, err
 	}

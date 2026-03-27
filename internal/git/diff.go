@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/quzhihao/code-review/internal/model"
+	"github.com/qzhello/code-review/internal/model"
 )
 
 var (

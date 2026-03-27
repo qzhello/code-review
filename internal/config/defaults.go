@@ -3,7 +3,7 @@ package config
 import (
 	"time"
 
-	"github.com/quzhihao/code-review/internal/model"
+	"github.com/qzhello/code-review/internal/model"
 )
 
 // DefaultConfig returns the default configuration.

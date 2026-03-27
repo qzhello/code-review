@@ -1,0 +1,23 @@
+{
+  "name": "@kizuhiko/cr",
+  "version": "0.1.0",
+  "description": "Code Review CLI — hybrid rule + AI agent code review tool",
+  "keywords": ["code-review", "lint", "ai", "openai", "git", "cli"],
+  "license": "MIT",
+  "bin": {
+    "cr": "bin/cr"
+  },
+  "scripts": {
+    "postinstall": "node install.js"
+  },
+  "files": [
+    "bin/",
+    "install.js",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=16"
+  },
+  "os": ["darwin", "linux", "win32"],
+  "cpu": ["x64", "arm64"]
+}

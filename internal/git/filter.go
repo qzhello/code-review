@@ -2,7 +2,7 @@ package git
 
 import (
 	"github.com/bmatcuk/doublestar/v4"
-	"github.com/quzhihao/code-review/internal/model"
+	"github.com/qzhello/code-review/internal/model"
 )
 
 // FilterFiles filters a DiffResult based on include/exclude glob patterns.
