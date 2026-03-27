@@ -5,10 +5,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
-
 	"time"
-
-	"golang.org/x/sync/errgroup"
 
 	"github.com/qzhello/code-review/internal/agent"
 	"github.com/qzhello/code-review/internal/cache"
@@ -47,27 +44,17 @@ type Stats struct {
 func (e *Engine) Run(ctx context.Context, diff *model.DiffResult, reviewMode string) (*Result, error) {
 	var ruleFindings, agentFindings []model.Finding
 
-	g, ctx := errgroup.WithContext(ctx)
-
-	// Rule-based review
+	// Rule-based review (runs first so agent can see rule findings)
 	if reviewMode == "hybrid" || reviewMode == "rules-only" {
-		g.Go(func() error {
-			findings, err := e.runRules(diff)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: rule review failed: %s\n", err)
-				return nil
-			}
+		findings, err := e.runRules(diff)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: rule review failed: %s\n", err)
+		} else {
 			ruleFindings = findings
-			return nil
-		})
+		}
 	}
 
-	// Wait for rules before starting agent (agent needs rule findings to avoid duplication)
-	if err := g.Wait(); err != nil {
-		return nil, err
-	}
-
-	// Agent review (sequential after rules, so it can receive rule findings)
+	// Agent review (uses the original ctx, not a derived one)
 	if reviewMode == "hybrid" || reviewMode == "agent-only" {
 		if e.cfg.Agent.Enabled {
 			findings, err := e.runAgent(ctx, diff, ruleFindings)

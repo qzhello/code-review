@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
+	"strings"
 	"sync"
 
 	"github.com/qzhello/code-review/internal/cache"
@@ -109,9 +111,20 @@ func (r *Reviewer) reviewChunk(ctx context.Context, systemPrompt string, chunk C
 }
 
 func parseAgentResponse(response string, defaultFile string) ([]model.Finding, error) {
+	// Strip <think>...</think> blocks from reasoning models (e.g., MiniMax, DeepSeek)
+	response = stripThinkingTags(response)
+
+	// Extract JSON from response (some models wrap JSON in markdown code blocks)
+	response = extractJSON(response)
+
 	var resp agentResponse
 	if err := json.Unmarshal([]byte(response), &resp); err != nil {
-		return nil, fmt.Errorf("failed to parse agent response: %w\nResponse: %s", err, response)
+		// Truncate long responses in error message
+		preview := response
+		if len(preview) > 200 {
+			preview = preview[:200] + "..."
+		}
+		return nil, fmt.Errorf("failed to parse agent response: %w\nResponse: %s", err, preview)
 	}
 
 	var findings []model.Finding
@@ -148,4 +161,47 @@ func filterByConfidence(findings []model.Finding, threshold string) []model.Find
 		}
 	}
 	return filtered
+}
+
+var thinkingRe = regexp.MustCompile(`(?s)<think>.*?</think>`)
+
+// stripThinkingTags removes <think>...</think> blocks from reasoning model responses.
+func stripThinkingTags(s string) string {
+	return strings.TrimSpace(thinkingRe.ReplaceAllString(s, ""))
+}
+
+// extractJSON extracts a JSON object from a response that may contain markdown code blocks.
+func extractJSON(s string) string {
+	s = strings.TrimSpace(s)
+
+	// Already starts with { — return as-is
+	if strings.HasPrefix(s, "{") {
+		return s
+	}
+
+	// Try to extract from ```json ... ``` or ``` ... ```
+	re := regexp.MustCompile("(?s)```(?:json)?\\s*\\n?(\\{.*?\\})\\s*```")
+	if m := re.FindStringSubmatch(s); len(m) > 1 {
+		return m[1]
+	}
+
+	// Try to find first { ... } block
+	start := strings.Index(s, "{")
+	if start >= 0 {
+		// Find matching closing brace
+		depth := 0
+		for i := start; i < len(s); i++ {
+			switch s[i] {
+			case '{':
+				depth++
+			case '}':
+				depth--
+				if depth == 0 {
+					return s[start : i+1]
+				}
+			}
+		}
+	}
+
+	return s
 }

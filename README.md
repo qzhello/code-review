@@ -323,6 +323,11 @@ cr review --staged --json --mode rules-only --min-severity error
        └────────────────┘
 ```
 
+## Build
+```shell
+CGO_ENABLED=1 /Users/quzhihao/GolandProjects/pkg/mod/golang.org/toolchain@v0.0.1-go1.25.0.darwin-arm64/bin/go build -o cr . 2>&1
+```
+
 ## License
 
 MIT
