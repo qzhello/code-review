@@ -1,0 +1,17 @@
+# Binary
+cr
+*.exe
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+
+# Test
+*.test
+
+# Config (user-specific)
+.cr/

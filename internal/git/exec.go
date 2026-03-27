@@ -11,9 +11,10 @@ import (
 // DiffOptions controls how git diff is invoked.
 type DiffOptions struct {
 	Staged       bool
-	Branch       string // compare HEAD to this branch (e.g., "main")
-	ContextLines int    // lines of context (default 3)
-	Paths        []string
+	Branch       string   // compare HEAD to this branch (e.g., "main")
+	Commit       string   // commit range (e.g., "abc..def", "HEAD~3", "v1.0.0..v2.0.0")
+	ContextLines int      // lines of context (default 3)
+	Paths        []string // restrict diff to these paths
 }
 
 // ExecDiff runs git diff and returns the raw output.
@@ -45,7 +46,10 @@ func buildDiffArgs(opts DiffOptions) []string {
 	}
 	args = append(args, fmt.Sprintf("-U%d", contextLines))
 
-	if opts.Staged {
+	if opts.Commit != "" {
+		// Support: "abc..def", "abc...def", "HEAD~3", "v1.0..v2.0", single commit
+		args = append(args, opts.Commit)
+	} else if opts.Staged {
 		args = append(args, "--cached")
 	} else if opts.Branch != "" {
 		args = append(args, fmt.Sprintf("%s...HEAD", opts.Branch))

@@ -1,6 +1,7 @@
 package rules
 
 import (
+	"path/filepath"
 	"regexp"
 
 	"github.com/bmatcuk/doublestar/v4"
@@ -40,12 +41,22 @@ func compileRule(id, severity, description, fileGlob, pattern, scope string, max
 }
 
 // matchesFile checks if a file path matches the rule's glob pattern.
+// Matches against both the full path and the basename for convenience
+// (so "*.go" matches "pkg/foo/bar.go").
 func (cr *compiledRule) matchesFile(path string) bool {
 	if cr.fileGlob == "" {
 		return true
 	}
-	ok, _ := doublestar.Match(cr.fileGlob, path)
-	return ok
+	// Try full path first
+	if ok, _ := doublestar.Match(cr.fileGlob, path); ok {
+		return true
+	}
+	// Try basename (so "*.go" matches "pkg/foo.go")
+	base := filepath.Base(path)
+	if ok, _ := doublestar.Match(cr.fileGlob, base); ok {
+		return true
+	}
+	return false
 }
 
 // matchesLine checks if a line content matches the rule's regex.
