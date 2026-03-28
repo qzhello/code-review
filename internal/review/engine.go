@@ -18,6 +18,7 @@ type Engine struct {
 	cfg        *model.Config
 	prdContent string
 	onProgress agent.ProgressFunc
+	onTotal    agent.TotalFunc
 }
 
 // NewEngine creates a new review engine.
@@ -28,6 +29,11 @@ func NewEngine(cfg *model.Config, prdContent string) *Engine {
 // SetProgress sets the progress callback for agent review.
 func (e *Engine) SetProgress(fn agent.ProgressFunc) {
 	e.onProgress = fn
+}
+
+// SetTotalCallback sets the callback to report actual chunk count.
+func (e *Engine) SetTotalCallback(fn agent.TotalFunc) {
+	e.onTotal = fn
 }
 
 // Result holds the combined review output.
@@ -153,6 +159,9 @@ func (e *Engine) runAgent(ctx context.Context, diff *model.DiffResult, existingF
 	}
 	if e.onProgress != nil {
 		reviewer.SetProgress(e.onProgress)
+	}
+	if e.onTotal != nil {
+		reviewer.SetTotalCallback(e.onTotal)
 	}
 	return reviewer.Review(ctx, diff, existingFindings)
 }

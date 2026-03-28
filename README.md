@@ -7,7 +7,7 @@ A terminal-based code review tool that combines **deterministic rule-based analy
 - **Hybrid review** — rule engine + AI agent working together
 - **19 built-in rules** for Go, Python, JavaScript/TypeScript, SQL, and security
 - **Custom rules** in YAML or JSON with glob file matching and regex patterns
-- **Interactive TUI** — navigate findings, accept/dismiss/fix inline
+- **Interactive TUI** — navigate findings, accept/dismiss/fix inline, AI chat mode for continuous conversation
 - **Git hooks** — pre-commit and pre-push hooks with auto-install
 - **PRD-aware review** — feed product requirements to the agent for context
 - **Noise reduction** — severity filtering, deduplication, grouping, confidence thresholds
@@ -256,7 +256,11 @@ cr rules export > my-rules.yaml
 
 ## Interactive TUI
 
-Launch with `cr review -i` for a full-screen terminal UI:
+Launch with `cr review -i` for a full-screen terminal UI with two interaction modes.
+
+### Browse Mode (default)
+
+Navigate findings with single-key hotkeys:
 
 ```
  Code Review  5 findings | 3 pending | 1/5
@@ -280,8 +284,86 @@ Launch with `cr review -i` for a full-screen terminal UI:
    I main.go:5             New TODO/FIXME added…
    E db.go:92              Possible SQL injecti…
 
- j/k:navigate  a:accept  d:dismiss  f:fixed  r:reset  enter:toggle diff  tab:next pending  q:quit
+ j/k:navigate  a:accept  d:dismiss  f:AI fix  r:reset  c:chat  enter:diff  tab:next  q:quit
 ```
+
+| Key | Action |
+|-----|--------|
+| `j` / `k` | Navigate down / up |
+| `a` | Accept finding (acknowledge) |
+| `d` | Dismiss finding (not an issue) |
+| `f` | **AI fix** — calls the LLM to generate and apply a code fix to the file |
+| `r` | Reset to pending |
+| `c` or `/` | **Enter chat mode** |
+| `Enter` | Toggle inline diff context |
+| `Tab` | Jump to next pending finding |
+| `q` | Quit |
+
+### Chat Mode (press `c` or `/`)
+
+A continuous conversational interface where you talk to the AI about findings. Type natural language messages and the AI understands your intent and **executes actions**.
+
+```
+ Code Review  CHAT  5 findings | 3 pending | 1/5
+
+ ERROR  auth.go:42  [sec-hardcoded-secret]
+ Possible hardcoded secret or API key
+ ────────────────────────────────────────────────
+
+ ● Now discussing: auth.go:42 — Possible hardcoded secret or API key
+
+ You: why is this a problem?
+
+ AI: Hardcoded secrets get committed to version control and can be leaked.
+ Anyone with repo access can see the key. Use environment variables or a
+ secrets manager instead.
+
+ You: fix this
+
+ AI: Replaced the hardcoded key with os.Getenv("API_KEY") and added a
+ startup check that exits if the variable is not set.
+ ● Fix applied to auth.go
+
+ You: next
+
+ ● Now discussing: handler.go:15 — Debug print statement
+
+ You: dismiss all info findings
+
+ ● Dismissed 1 finding(s)
+
+ > Type a message... (e.g. 'fix this', 'explain why', 'dismiss')
+
+ enter:send  ctrl+p/n:prev/next finding  esc:browse mode  ctrl+c:quit
+```
+
+#### What you can say
+
+The AI interprets your intent and takes the corresponding action:
+
+| You say | AI does |
+|---------|---------|
+| `fix this` | Generates a code fix and writes it to the file |
+| `fix this by using env vars` | Fixes with your specific instruction |
+| `explain why this is a problem` | Explains the issue in detail |
+| `what's the best practice here` | Suggests alternative approaches |
+| `ok` / `looks good` | Accepts the finding |
+| `not a problem` / `ignore` / `dismiss` | Dismisses the finding |
+| `next` / `skip` | Navigates to the next finding |
+| `previous` / `go back` | Navigates to the previous finding |
+| `dismiss all info findings` | Batch dismiss by severity |
+| `accept all warnings` | Batch accept by severity |
+| `accept everything` | Accept all pending findings |
+
+#### Chat mode keys
+
+| Key | Action |
+|-----|--------|
+| `Enter` | Send message |
+| `Ctrl+P` | Previous finding (without leaving chat) |
+| `Ctrl+N` | Next finding (without leaving chat) |
+| `Esc` | Return to browse mode |
+| `Ctrl+C` | Quit |
 
 ## CI Integration
 
@@ -302,10 +384,10 @@ cr review --staged --json --mode rules-only --min-severity error
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────┐
-│                 CLI (Cobra)                      │
-│  review | init | rules | config | hook | stats   │
-└──────────────┬──────────────────────────────────┘
+┌──────────────────────────────────────────────────┐
+│                  CLI (Cobra)                       │
+│  review | init | rules | config | hook | stats     │
+└──────────────┬───────────────────────────────────┘
                │
        ┌───────▼────────┐
        │  Review Engine  │
@@ -321,9 +403,24 @@ cr review --staged --json --mode rules-only --min-severity error
        │  + Filter       │
        └───────┬─────────┘
                │
+       ┌───────▼────────────────────────────────┐
+       │  Interactive TUI (Bubble Tea)           │
+       │  ┌──────────┐  ┌─────────────────────┐ │
+       │  │  Browse   │  │  Chat Mode          │ │
+       │  │  Mode     │  │  Multi-turn LLM     │ │
+       │  │  (hotkeys)│  │  conversation       │ │
+       │  └─────┬─────┘  └──────┬──────────────┘ │
+       │        │               │                 │
+       │  ┌─────▼───────────────▼──────────────┐ │
+       │  │  Action Handler                     │ │
+       │  │  fix (AI) | accept | dismiss |      │ │
+       │  │  navigate | batch ops               │ │
+       │  └────────────────────────────────────┘ │
+       └───────┬────────────────────────────────┘
+               │
        ┌───────▼────────┐
        │  Output / Store │
-       │  TUI / JSON     │
+       │  JSON / History │
        └────────────────┘
 ```
 

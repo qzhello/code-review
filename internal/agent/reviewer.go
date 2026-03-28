@@ -31,12 +31,16 @@ type agentFinding struct {
 // fileName is the file being reviewed, done is true when the chunk is complete.
 type ProgressFunc func(fileName string, done bool, cached bool)
 
+// TotalFunc is called once with the actual number of chunks to review.
+type TotalFunc func(total int)
+
 // Reviewer orchestrates LLM-powered code review.
 type Reviewer struct {
 	client     *Client
 	cfg        model.AgentConfig
 	prdContent string
 	onProgress ProgressFunc
+	onTotal    TotalFunc
 }
 
 // NewReviewer creates a new agent reviewer.
@@ -55,12 +59,21 @@ func (r *Reviewer) SetProgress(fn ProgressFunc) {
 	r.onProgress = fn
 }
 
+// SetTotalCallback sets the callback to report the actual chunk count.
+func (r *Reviewer) SetTotalCallback(fn TotalFunc) {
+	r.onTotal = fn
+}
+
 // Review runs the agent review on a diff, returning findings.
 // existingFindings are passed to the prompt to avoid duplication.
 func (r *Reviewer) Review(ctx context.Context, diff *model.DiffResult, existingFindings []model.Finding) ([]model.Finding, error) {
 	chunks := ChunkDiff(diff, 200)
 	if len(chunks) == 0 {
 		return nil, nil
+	}
+
+	if r.onTotal != nil {
+		r.onTotal(len(chunks))
 	}
 
 	systemPrompt := BuildSystemPrompt(r.cfg, existingFindings, r.prdContent)

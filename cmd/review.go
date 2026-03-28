@@ -147,8 +147,10 @@ func runReview(cmd *cobra.Command, args []string) error {
 
 	// Set up progress bar for agent review (only in terminal, non-JSON mode)
 	if !jsonOutput && (reviewMode == "hybrid" || reviewMode == "agent-only") && cfg.Agent.Enabled {
-		chunks := len(diff.Files) // approximate chunk count
-		progress := output.NewProgress(chunks, true)
+		progress := output.NewProgress(len(diff.Files), true)
+		engine.SetTotalCallback(func(total int) {
+			progress.SetTotal(total)
+		})
 		engine.SetProgress(func(fileName string, done bool, cached bool) {
 			if done {
 				progress.Complete(fileName, cached)
@@ -167,8 +169,12 @@ func runReview(cmd *cobra.Command, args []string) error {
 	// Step 4: Output
 	elapsed := time.Since(start)
 	if interactive && len(result.Findings) > 0 {
-		// Interactive TUI mode
-		tuiModel := tui.NewModel(result, diff)
+		// Interactive TUI mode — pass agent config so TUI can invoke AI fixes
+		var agentCfg *model.AgentConfig
+		if cfg.Agent.Enabled && cfg.Agent.APIKey != "" {
+			agentCfg = &cfg.Agent
+		}
+		tuiModel := tui.NewModel(result, diff, agentCfg)
 		p := tea.NewProgram(tuiModel, tea.WithAltScreen())
 		finalModel, err := p.Run()
 		if err != nil {

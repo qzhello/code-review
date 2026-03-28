@@ -30,6 +30,16 @@ func NewProgress(total int, enabled bool) *Progress {
 	}
 }
 
+// SetTotal updates the total count (e.g., when actual chunk count is known).
+func (p *Progress) SetTotal(total int) {
+	if !p.enabled {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.total = total
+}
+
 // Start marks a file as in-progress.
 func (p *Progress) Start(fileName string) {
 	if !p.enabled {
@@ -88,6 +98,9 @@ func (p *Progress) render() {
 	filled := 0
 	if p.total > 0 {
 		filled = (p.completed * barWidth) / p.total
+	}
+	if filled > barWidth {
+		filled = barWidth
 	}
 	bar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
 
