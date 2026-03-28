@@ -16,6 +16,10 @@ A terminal-based code review tool that combines **deterministic rule-based analy
 - **Review history** — SQLite-backed history with recall
 - **Flexible targeting** — staged changes, branch compare, commit ranges, path scoping
 
+![img.png](imgs/img.png)
+
+![history.png](imgs/history.png)
+
 ## Install
 
 ### npm (recommended)
