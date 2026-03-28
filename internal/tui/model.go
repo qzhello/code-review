@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -63,11 +64,25 @@ type chatResponseMsg struct {
 	err  error
 }
 
-// fixResultMsg is sent when an async fix operation completes.
-type fixResultMsg struct {
-	index       int
-	explanation string
-	err         error
+// fixProposalMsg is sent when an async fix proposal completes (browse or chat mode).
+type fixProposalMsg struct {
+	index    int
+	proposal *agent.FixProposal
+	err      error
+}
+
+// pendingFix holds a proposed fix awaiting user confirmation.
+type pendingFix struct {
+	index    int
+	proposal *agent.FixProposal
+}
+
+// chatPendingFix holds a proposed fix from chat mode awaiting confirmation.
+type chatPendingFix struct {
+	filePath     string
+	fixedContent string
+	original     string
+	explanation  string
 }
 
 // uiMode represents the current interaction mode.
@@ -100,6 +115,10 @@ type Model struct {
 	session     *agent.ChatSession // multi-turn LLM session
 	chatWaiting bool               // waiting for AI response
 	chatCtxIdx  int                // which finding index the session is contextualized for (-1 = none)
+
+	// Pending fix confirmation
+	browsePendingFix *pendingFix     // pending fix from browse mode (f key)
+	chatPending      *chatPendingFix // pending fix from chat mode
 }
 
 // NewModel creates a new TUI model.
@@ -174,15 +193,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewport.GotoBottom()
 		return m, nil
 
-	case fixResultMsg:
+	case fixProposalMsg:
 		if msg.index >= 0 && msg.index < len(m.findings) {
 			if msg.err != nil {
 				m.findings[msg.index].Action = ActionPending
 				m.findings[msg.index].FixError = msg.err.Error()
 			} else {
-				m.findings[msg.index].Action = ActionFixed
-				m.findings[msg.index].Explanation = msg.explanation
+				// Store as pending — user must confirm
+				m.findings[msg.index].Action = ActionPending
 				m.findings[msg.index].FixError = ""
+				m.browsePendingFix = &pendingFix{index: msg.index, proposal: msg.proposal}
 			}
 			m.viewport.SetContent(m.renderBody())
 		}
@@ -230,7 +250,10 @@ func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.viewport.SetContent(m.renderBody())
 
 	case "f":
-		// Quick AI fix (non-conversational)
+		// AI fix proposal (non-conversational)
+		if m.browsePendingFix != nil {
+			break // already has a pending fix to confirm
+		}
 		item := &m.findings[m.cursor]
 		if item.Action == ActionFixing {
 			break
@@ -251,10 +274,31 @@ func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			defer cancel()
 			fixer, err := agent.NewFixer(cfg)
 			if err != nil {
-				return fixResultMsg{index: idx, err: err}
+				return fixProposalMsg{index: idx, err: err}
 			}
-			explanation, err := fixer.Fix(ctx, finding)
-			return fixResultMsg{index: idx, explanation: explanation, err: err}
+			proposal, err := fixer.Propose(ctx, finding)
+			return fixProposalMsg{index: idx, proposal: proposal, err: err}
+		}
+
+	case "y":
+		// Accept pending fix
+		if m.browsePendingFix != nil {
+			pf := m.browsePendingFix
+			if err := pf.proposal.Apply(); err != nil {
+				m.findings[pf.index].FixError = err.Error()
+			} else {
+				m.findings[pf.index].Action = ActionFixed
+				m.findings[pf.index].Explanation = pf.proposal.Explanation
+			}
+			m.browsePendingFix = nil
+			m.viewport.SetContent(m.renderBody())
+		}
+
+	case "n":
+		// Reject pending fix
+		if m.browsePendingFix != nil {
+			m.browsePendingFix = nil
+			m.viewport.SetContent(m.renderBody())
 		}
 
 	case "r":
@@ -341,8 +385,35 @@ func (m Model) updateChat(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if text == "" || m.chatWaiting {
 			return m, nil
 		}
-
 		m.input.SetValue("")
+
+		// Handle pending fix confirmation locally (don't send to AI)
+		if m.chatPending != nil {
+			lower := strings.ToLower(text)
+			m.chatHistory = append(m.chatHistory, chatMsg{role: "user", content: text})
+			if lower == "accept" || lower == "apply" || lower == "yes" || lower == "y" || lower == "ok" {
+				if err := agent.ApplyFix(m.chatPending.filePath, m.chatPending.fixedContent); err != nil {
+					m.chatHistory = append(m.chatHistory, chatMsg{role: "system", content: "Failed to apply fix: " + err.Error()})
+				} else {
+					m.findings[m.cursor].Action = ActionFixed
+					m.findings[m.cursor].Explanation = m.chatPending.explanation
+					m.chatHistory = append(m.chatHistory, chatMsg{role: "system", content: "Fix applied to " + m.chatPending.filePath})
+				}
+			} else if lower == "cancel" || lower == "reject" || lower == "no" || lower == "n" {
+				m.chatHistory = append(m.chatHistory, chatMsg{role: "system", content: "Fix discarded."})
+			} else {
+				// Not a confirm/cancel — keep pending and send to AI for clarification
+				m.chatHistory = append(m.chatHistory, chatMsg{role: "system", content: "Pending fix — type 'accept' to apply or 'cancel' to discard."})
+			}
+			if lower == "accept" || lower == "apply" || lower == "yes" || lower == "y" || lower == "ok" ||
+				lower == "cancel" || lower == "reject" || lower == "no" || lower == "n" {
+				m.chatPending = nil
+			}
+			m.viewport.SetContent(m.renderBody())
+			m.viewport.GotoBottom()
+			return m, nil
+		}
+
 		m.chatHistory = append(m.chatHistory, chatMsg{role: "user", content: text})
 		m.chatWaiting = true
 		m.viewport.SetContent(m.renderBody())
@@ -379,13 +450,22 @@ func (m *Model) handleChatAction(resp *agent.ChatResponse) {
 	case "fix":
 		if resp.FixedContent != "" && target == "current" {
 			filePath := m.findings[m.cursor].Finding.FilePath
-			if err := agent.ApplyFix(filePath, resp.FixedContent); err != nil {
-				m.chatHistory = append(m.chatHistory, chatMsg{role: "system", content: "Failed to apply fix: " + err.Error()})
-			} else {
-				m.findings[m.cursor].Action = ActionFixed
-				m.findings[m.cursor].Explanation = resp.Message
-				m.chatHistory = append(m.chatHistory, chatMsg{role: "system", content: "Fix applied to " + filePath})
+			// Read original content for diff preview
+			original, err := os.ReadFile(filePath)
+			if err != nil {
+				m.chatHistory = append(m.chatHistory, chatMsg{role: "system", content: "Failed to read file: " + err.Error()})
+				return
 			}
+			m.chatPending = &chatPendingFix{
+				filePath:     filePath,
+				fixedContent: resp.FixedContent,
+				original:     string(original),
+				explanation:  resp.Message,
+			}
+			m.chatHistory = append(m.chatHistory, chatMsg{
+				role:    "system",
+				content: "Fix proposed. Type 'accept' to apply or 'cancel' to discard.\n\n" + m.renderFixDiff(string(original), resp.FixedContent),
+			})
 		}
 
 	case "dismiss":
@@ -632,6 +712,74 @@ func (m Model) renderInput() string {
 	return promptStyle.Render("> ") + m.input.View()
 }
 
+// renderFixDiff produces a simple line-by-line diff between original and fixed content.
+func (m Model) renderFixDiff(original, fixed string) string {
+	origLines := strings.Split(original, "\n")
+	fixedLines := strings.Split(fixed, "\n")
+
+	var sb strings.Builder
+	addStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("78"))
+	delStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
+
+	// Find changed region to keep diff compact
+	// Find first differing line
+	start := 0
+	minLen := len(origLines)
+	if len(fixedLines) < minLen {
+		minLen = len(fixedLines)
+	}
+	for start < minLen && origLines[start] == fixedLines[start] {
+		start++
+	}
+	// Find last differing line (from end)
+	endOrig := len(origLines) - 1
+	endFixed := len(fixedLines) - 1
+	for endOrig > start && endFixed > start && origLines[endOrig] == fixedLines[endFixed] {
+		endOrig--
+		endFixed--
+	}
+
+	// Show context: 3 lines before/after
+	ctxStart := start - 3
+	if ctxStart < 0 {
+		ctxStart = 0
+	}
+	ctxEndOrig := endOrig + 3
+	if ctxEndOrig >= len(origLines) {
+		ctxEndOrig = len(origLines) - 1
+	}
+	ctxEndFixed := endFixed + 3
+	if ctxEndFixed >= len(fixedLines) {
+		ctxEndFixed = len(fixedLines) - 1
+	}
+
+	// Context before
+	for i := ctxStart; i < start; i++ {
+		sb.WriteString(fmt.Sprintf("  %s\n", origLines[i]))
+	}
+	// Removed lines
+	for i := start; i <= endOrig && i < len(origLines); i++ {
+		sb.WriteString(delStyle.Render(fmt.Sprintf("- %s", origLines[i])) + "\n")
+	}
+	// Added lines
+	for i := start; i <= endFixed && i < len(fixedLines); i++ {
+		sb.WriteString(addStyle.Render(fmt.Sprintf("+ %s", fixedLines[i])) + "\n")
+	}
+	// Context after
+	afterStart := endOrig + 1
+	if afterStart < 0 {
+		afterStart = 0
+	}
+	for i := afterStart; i <= ctxEndOrig && i < len(origLines); i++ {
+		sb.WriteString(fmt.Sprintf("  %s\n", origLines[i]))
+	}
+
+	if sb.Len() == 0 {
+		return "(no changes)"
+	}
+	return sb.String()
+}
+
 func (m Model) renderDetail() string {
 	if len(m.findings) == 0 {
 		return "No findings to review."
@@ -656,6 +804,28 @@ func (m Model) renderDetail() string {
 		sb.WriteString("\n")
 	}
 	sb.WriteString("\n")
+
+	// Pending fix preview (browse mode)
+	if m.browsePendingFix != nil && m.browsePendingFix.index == m.cursor {
+		pf := m.browsePendingFix.proposal
+		confirmStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("214")).
+			Bold(true)
+		sb.WriteString(confirmStyle.Render("Proposed fix: " + pf.Explanation))
+		sb.WriteString("\n\n")
+
+		diffBox := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("214")).
+			Padding(0, 1)
+		sb.WriteString(diffBox.Render(m.renderFixDiff(pf.Original, pf.FixedContent)))
+		sb.WriteString("\n\n")
+
+		hintStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("214"))
+		sb.WriteString(hintStyle.Render("Press y to apply, n to discard"))
+		sb.WriteString("\n\n")
+	}
 
 	// Fix error
 	if item.FixError != "" {
@@ -755,7 +925,13 @@ func (m Model) renderFooter() string {
 
 	var keys string
 	if m.mode == modeChat {
-		keys = "enter:send  ctrl+p/n:prev/next finding  esc:browse mode  ctrl+c:quit"
+		if m.chatPending != nil {
+			keys = "Type 'accept' to apply fix, 'cancel' to discard  esc:browse mode  ctrl+c:quit"
+		} else {
+			keys = "enter:send  ctrl+p/n:prev/next finding  esc:browse mode  ctrl+c:quit"
+		}
+	} else if m.browsePendingFix != nil {
+		keys = "y:apply fix  n:discard fix  q:quit"
 	} else {
 		keys = "j/k:navigate  a:accept  d:dismiss  f:AI fix  r:reset  c:chat  enter:diff  tab:next  q:quit"
 	}

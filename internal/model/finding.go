@@ -1,6 +1,10 @@
 package model
 
-import "fmt"
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+)
 
 // Severity represents the severity level of a finding.
 type Severity int
@@ -78,12 +82,19 @@ type Finding struct {
 	Severity   Severity   `json:"severity"`
 	Confidence Confidence `json:"confidence"`
 	FilePath   string     `json:"file_path"`
-	Line       int        `json:"line"`       // 0 = file-level finding
-	EndLine    int        `json:"end_line"`   // for ranges; 0 = single line
+	Line       int        `json:"line"`     // 0 = file-level finding
+	EndLine    int        `json:"end_line"` // for ranges; 0 = single line
 	Message    string     `json:"message"`
 	Category   string     `json:"category"`   // e.g., "security", "performance"
 	Source     string     `json:"source"`     // "rule" or "agent"
 	Suggestion string     `json:"suggestion"` // optional fix suggestion
+}
+
+// Hash returns a stable SHA256 fingerprint of the finding (file + rule + message).
+func (f *Finding) Hash() string {
+	raw := f.FilePath + "|" + f.RuleID + "|" + f.Message
+	sum := sha256.Sum256([]byte(raw))
+	return hex.EncodeToString(sum[:])
 }
 
 // Location returns a formatted file:line string.

@@ -8,15 +8,26 @@ A terminal-based code review tool that combines **deterministic rule-based analy
 - **19 built-in rules** for Go, Python, JavaScript/TypeScript, SQL, and security
 - **Custom rules** in YAML or JSON with glob file matching and regex patterns
 - **Interactive TUI** — navigate findings, accept/dismiss/fix inline, AI chat mode for continuous conversation
+- **Web UI** — browser-based review interface with dark theme, diff viewer, AI chat, and fix preview
 - **Git hooks** — pre-commit and pre-push hooks with auto-install
 - **PRD-aware review** — feed product requirements to the agent for context
 - **Noise reduction** — severity filtering, deduplication, grouping, confidence thresholds
+- **Export reports** — export findings as Markdown reports (`--export report.md`)
+- **Persistent dismissals** — dismissed findings stay dismissed across reviews
 - **LLM caching** — avoid re-reviewing identical diffs
 - **Cost tracking** — monitor token usage and estimated spend
 - **Review history** — SQLite-backed history with recall
 - **Flexible targeting** — staged changes, branch compare, commit ranges, path scoping
 
+**Web UI**
+
+![ui.png](imgs/ui.png)
+
+**Review Command**
+
 ![img.png](imgs/img.png)
+
+**Show History List**
 
 ![history.png](imgs/history.png)
 
@@ -86,9 +97,28 @@ cr review --json                   # JSON output for CI
 cr review --min-severity warn      # filter out info-level findings
 cr review -v                       # verbose output
 
+# Export report
+cr review --export report.md       # export findings as Markdown
+cr review --staged --export r.md   # combine with any flags
+
 # Interactive TUI
 cr review -i                       # navigate, accept, dismiss findings
+
+# Web UI
+cr web                             # review + open browser
+cr web --staged                    # review staged changes
+cr web --port 3000                 # use specific port
+cr web --no-open                   # don't auto-open browser
 ```
+
+### Dismissed Findings
+
+```bash
+cr dismiss list                    # show all persistently dismissed findings
+cr dismiss clear                   # clear all dismissals
+```
+
+Findings dismissed in interactive mode (`cr review -i`) are automatically saved and filtered out of future reviews.
 
 ### Rule Management
 
@@ -364,6 +394,74 @@ The AI interprets your intent and takes the corresponding action:
 | `Ctrl+N` | Next finding (without leaving chat) |
 | `Esc` | Return to browse mode |
 | `Ctrl+C` | Quit |
+
+## Web UI
+
+Launch with `cr web` for a browser-based review interface. Runs the review, then starts a local HTTP server and opens your browser.
+
+```bash
+cr web                      # review all uncommitted changes
+cr web --staged             # review staged changes only
+cr web --branch main        # compare to branch
+cr web --port 3000          # use a specific port
+cr web --no-open            # don't auto-open browser
+```
+
+### Features
+
+- **Dark theme** — GitHub-inspired dark UI, easy on the eyes
+- **Findings sidebar** — filterable list (All / Pending / Errors / Warnings)
+- **Detail view** — severity badge, message, suggestion, inline diff with syntax coloring
+- **AI Fix with preview** — click "AI Fix", review the proposed diff, then "Apply" or "Discard"
+- **AI Chat panel** — continuous conversation about any finding, same capabilities as TUI chat mode
+- **Real-time updates** — fix status updates live as the AI works
+- **Keyboard shortcuts** — press `?` to see all shortcuts (`j/k` navigate, `a/d/f/r` actions, `Tab` next pending, `/` chat)
+
+### Layout
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│  CR  Code Review                    3 errors  2 warnings  1 fixed│
+├──────────┬───────────────────────────────────┬───────────────────┤
+│ Findings │  ERROR  auth.go:42  [agent]       │  AI Chat          │
+│          │                                   │                   │
+│ > E auth │  Possible hardcoded secret or     │  You: fix this    │
+│   W hand │  API key                          │                   │
+│   W hand │                                   │  AI: Replaced the │
+│   I main │  Suggestion                       │  hardcoded key    │
+│   E db.g │  Use environment variables...     │  with os.Getenv() │
+│          │                                   │                   │
+│  Filters │  [Accept] [Dismiss] [AI Fix]      │  > Type a message │
+│  All|Pen │                                   │                   │
+│          │  ┌─ Proposed Fix ──────────────┐  │                   │
+│          │  │ - apiKey := "sk-abc123"     │  │                   │
+│          │  │ + apiKey := os.Getenv(...)  │  │                   │
+│          │  │ [Apply Fix]  [Discard]      │  │                   │
+│          │  └─────────────────────────────┘  │                   │
+├──────────┴───────────────────────────────────┴───────────────────┤
+```
+
+## Export Reports
+
+Export review findings as a Markdown report:
+
+```bash
+cr review --export report.md
+cr review --staged --branch main --export review.md
+```
+
+The report includes a summary table, findings grouped by file, severity badges, suggestions, and inline diff context as fenced code blocks. Useful for sharing review results in PRs, wikis, or documentation.
+
+## Persistent Dismissals
+
+When you dismiss a finding in interactive mode (`cr review -i`), it's saved to the local SQLite database. Future reviews automatically filter out dismissed findings, so you don't see the same false positives again.
+
+```bash
+cr dismiss list       # see all dismissed findings (hash, file, rule, date)
+cr dismiss clear      # reset — bring back all dismissed findings
+```
+
+Dismissals are fingerprinted by `file + rule + message`, so they survive code changes that don't alter the finding itself.
 
 ## CI Integration
 

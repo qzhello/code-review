@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -30,6 +31,7 @@ var (
 	prdFile     string
 	interactive bool
 	lang        string
+	exportFile  string
 )
 
 var reviewCmd = &cobra.Command{
@@ -66,6 +68,7 @@ func init() {
 	reviewCmd.Flags().StringVar(&prdFile, "prd", "", "path to PRD/requirements document for context-aware review")
 	reviewCmd.Flags().BoolVarP(&interactive, "interactive", "i", false, "interactive TUI mode for reviewing findings")
 	reviewCmd.Flags().StringVar(&lang, "lang", "", "output language for agent findings: en, zh, ja, ko, etc. (overrides config)")
+	reviewCmd.Flags().StringVar(&exportFile, "export", "", "export findings to a file (supports .md)")
 }
 
 func runReview(cmd *cobra.Command, args []string) error {
@@ -166,6 +169,38 @@ func runReview(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("review failed: %w", err)
 	}
 
+	// Filter out previously dismissed findings
+	var db *store.DB
+	if cfg.Store.Enabled {
+		db, err = store.Open(cfg.Store.Path)
+		if err != nil {
+			if verbose {
+				fmt.Fprintf(os.Stderr, "Warning: failed to open store for dismissals: %s\n", err)
+			}
+		} else {
+			defer db.Close()
+			result.Findings = review.FilterDismissed(result.Findings, db)
+		}
+	}
+
+	// Export report if --export is set
+	if exportFile != "" {
+		if strings.HasSuffix(exportFile, ".md") {
+			f, err := os.Create(exportFile)
+			if err != nil {
+				return fmt.Errorf("failed to create export file: %w", err)
+			}
+			if err := output.ExportMarkdown(result, diff, f); err != nil {
+				f.Close()
+				return fmt.Errorf("failed to export markdown: %w", err)
+			}
+			f.Close()
+			fmt.Printf("Report exported to %s\n", exportFile)
+		} else {
+			return fmt.Errorf("unsupported export format: only .md is supported")
+		}
+	}
+
 	// Step 4: Output
 	elapsed := time.Since(start)
 	if interactive && len(result.Findings) > 0 {
@@ -181,9 +216,20 @@ func runReview(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("TUI error: %w", err)
 		}
 
-		// Print summary of user actions
+		// Print summary of user actions and save dismissals
 		if fm, ok := finalModel.(tui.Model); ok {
-			printTUIActions(fm.Findings())
+			items := fm.Findings()
+			printTUIActions(items)
+
+			// Persist newly dismissed findings
+			if db != nil {
+				for _, item := range items {
+					if item.Action == tui.ActionDismissed {
+						f := item.Finding
+						_ = db.DismissFindingByHash(f.Hash(), f.FilePath, f.RuleID, f.Message)
+					}
+				}
+			}
 		}
 	} else if jsonOutput {
 		output.PrintJSON(result, elapsed)

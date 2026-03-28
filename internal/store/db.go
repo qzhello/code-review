@@ -62,6 +62,14 @@ func migrate(db *sql.DB) error {
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			UNIQUE(rule_id, file_path, content_hash)
 		)`,
+		`CREATE TABLE IF NOT EXISTS dismissed_findings (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			hash TEXT UNIQUE NOT NULL,
+			file_path TEXT NOT NULL,
+			rule_id TEXT NOT NULL,
+			message TEXT NOT NULL,
+			dismissed_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
 		`CREATE TABLE IF NOT EXISTS model_configs (
 			name TEXT PRIMARY KEY,
 			provider TEXT NOT NULL DEFAULT '',

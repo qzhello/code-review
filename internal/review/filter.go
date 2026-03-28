@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/qzhello/code-review/internal/model"
+	"github.com/qzhello/code-review/internal/store"
 )
 
 // FilterFindings applies noise reduction to a list of findings.
@@ -119,4 +120,16 @@ func ContentHash(f model.Finding) string {
 	raw := fmt.Sprintf("%s|%s|%s", f.RuleID, f.FilePath, f.Message)
 	hash := sha256.Sum256([]byte(raw))
 	return fmt.Sprintf("%x", hash[:16])
+}
+
+// FilterDismissed removes findings that have been persistently dismissed.
+func FilterDismissed(findings []model.Finding, db *store.DB) []model.Finding {
+	var filtered []model.Finding
+	for _, f := range findings {
+		dismissed, err := db.IsDismissedByHash(f.Hash())
+		if err != nil || !dismissed {
+			filtered = append(filtered, f)
+		}
+	}
+	return filtered
 }

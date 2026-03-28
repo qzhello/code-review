@@ -38,6 +38,8 @@ func init() {
 	rootCmd.AddCommand(hookCmd)
 	rootCmd.AddCommand(statsCmd)
 	rootCmd.AddCommand(versionCmd)
+	rootCmd.AddCommand(dismissCmd)
+	rootCmd.AddCommand(webCmd)
 }
 
 var versionCmd = &cobra.Command{

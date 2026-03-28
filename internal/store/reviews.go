@@ -93,7 +93,7 @@ func (d *DB) ClearReviews() error {
 	return err
 }
 
-// DismissFinding records a finding dismissal.
+// DismissFinding records a finding dismissal (legacy, uses dismissals table).
 func (d *DB) DismissFinding(ruleID, filePath, contentHash, reason string) error {
 	_, err := d.db.Exec(
 		`INSERT OR REPLACE INTO dismissals (rule_id, file_path, content_hash, reason) VALUES (?, ?, ?, ?)`,
@@ -102,7 +102,7 @@ func (d *DB) DismissFinding(ruleID, filePath, contentHash, reason string) error 
 	return err
 }
 
-// IsDismissed checks if a finding has been dismissed.
+// IsDismissed checks if a finding has been dismissed (legacy, uses dismissals table).
 func (d *DB) IsDismissed(ruleID, filePath, contentHash string) (bool, error) {
 	var count int
 	err := d.db.QueryRow(
@@ -110,4 +110,65 @@ func (d *DB) IsDismissed(ruleID, filePath, contentHash string) (bool, error) {
 		ruleID, filePath, contentHash,
 	).Scan(&count)
 	return count > 0, err
+}
+
+// DismissedFinding represents a persistently dismissed finding.
+type DismissedFinding struct {
+	ID          int
+	Hash        string
+	FilePath    string
+	RuleID      string
+	Message     string
+	DismissedAt time.Time
+}
+
+// DismissFindingByHash inserts a dismissed finding by its hash (INSERT OR IGNORE).
+func (d *DB) DismissFindingByHash(hash, filePath, ruleID, message string) error {
+	_, err := d.db.Exec(
+		`INSERT OR IGNORE INTO dismissed_findings (hash, file_path, rule_id, message) VALUES (?, ?, ?, ?)`,
+		hash, filePath, ruleID, message,
+	)
+	return err
+}
+
+// UndismissFinding removes a dismissed finding by its hash.
+func (d *DB) UndismissFinding(hash string) error {
+	_, err := d.db.Exec(`DELETE FROM dismissed_findings WHERE hash = ?`, hash)
+	return err
+}
+
+// IsDismissedByHash checks if a finding hash exists in the dismissed_findings table.
+func (d *DB) IsDismissedByHash(hash string) (bool, error) {
+	var count int
+	err := d.db.QueryRow(
+		`SELECT COUNT(*) FROM dismissed_findings WHERE hash = ?`, hash,
+	).Scan(&count)
+	return count > 0, err
+}
+
+// ListDismissed returns all persistently dismissed findings.
+func (d *DB) ListDismissed() ([]DismissedFinding, error) {
+	rows, err := d.db.Query(
+		`SELECT id, hash, file_path, rule_id, message, dismissed_at FROM dismissed_findings ORDER BY dismissed_at DESC`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []DismissedFinding
+	for rows.Next() {
+		var df DismissedFinding
+		if err := rows.Scan(&df.ID, &df.Hash, &df.FilePath, &df.RuleID, &df.Message, &df.DismissedAt); err != nil {
+			return nil, err
+		}
+		results = append(results, df)
+	}
+	return results, rows.Err()
+}
+
+// ClearDismissed removes all dismissed findings.
+func (d *DB) ClearDismissed() error {
+	_, err := d.db.Exec(`DELETE FROM dismissed_findings`)
+	return err
 }

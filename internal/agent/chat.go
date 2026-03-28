@@ -3,7 +3,9 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -29,12 +31,14 @@ type ChatResponse struct {
 
 // ChatSession maintains a multi-turn conversation about code review findings.
 type ChatSession struct {
-	client   *openai.Client
-	cfg      model.AgentConfig
-	messages []openai.ChatCompletionMessage
+	client       *openai.Client
+	cfg          model.AgentConfig
+	systemPrompt string // base system prompt (without finding context)
+	plainMode    bool   // plain markdown mode (no JSON) for web streaming
+	messages     []openai.ChatCompletionMessage
 }
 
-// NewChatSession creates a new chat session for interactive code review.
+// NewChatSession creates a new chat session for interactive code review (JSON mode for TUI).
 func NewChatSession(cfg model.AgentConfig) (*ChatSession, error) {
 	client, err := NewClient(cfg, (*cache.Cache)(nil))
 	if err != nil {
@@ -44,8 +48,30 @@ func NewChatSession(cfg model.AgentConfig) (*ChatSession, error) {
 	systemPrompt := buildChatSystemPrompt(cfg)
 
 	return &ChatSession{
-		client: client.client,
-		cfg:    cfg,
+		client:       client.client,
+		cfg:          cfg,
+		systemPrompt: systemPrompt,
+		messages: []openai.ChatCompletionMessage{
+			{Role: openai.ChatMessageRoleSystem, Content: systemPrompt},
+		},
+	}, nil
+}
+
+// NewPlainChatSession creates a chat session for web UI — plain markdown output, no JSON.
+// This enables reliable streaming since the LLM outputs clean text directly.
+func NewPlainChatSession(cfg model.AgentConfig) (*ChatSession, error) {
+	client, err := NewClient(cfg, (*cache.Cache)(nil))
+	if err != nil {
+		return nil, err
+	}
+
+	systemPrompt := buildPlainChatSystemPrompt(cfg)
+
+	return &ChatSession{
+		client:       client.client,
+		cfg:          cfg,
+		systemPrompt: systemPrompt,
+		plainMode:    true,
 		messages: []openai.ChatCompletionMessage{
 			{Role: openai.ChatMessageRoleSystem, Content: systemPrompt},
 		},
@@ -53,7 +79,8 @@ func NewChatSession(cfg model.AgentConfig) (*ChatSession, error) {
 }
 
 // SetFindingContext updates the conversation context for a specific finding.
-// This adds a system-level context message so the AI knows which finding is being discussed.
+// The finding context is merged into a single system message to ensure compatibility
+// with APIs that only support one system message (e.g., MiniMax, some OpenAI-compatible providers).
 func (s *ChatSession) SetFindingContext(finding model.Finding) error {
 	fileContent, err := os.ReadFile(finding.FilePath)
 	if err != nil {
@@ -62,24 +89,13 @@ func (s *ChatSession) SetFindingContext(finding model.Finding) error {
 
 	contextMsg := buildFindingContext(finding, string(fileContent))
 
-	// Keep system prompt, replace or add finding context
-	// System prompt is always messages[0]. Finding context is messages[1] if it exists.
-	if len(s.messages) > 1 && s.messages[1].Role == openai.ChatMessageRoleSystem {
-		s.messages[1] = openai.ChatCompletionMessage{
-			Role:    openai.ChatMessageRoleSystem,
-			Content: contextMsg,
-		}
-		// Clear conversation history when switching findings
-		s.messages = s.messages[:2]
-	} else {
-		// Insert finding context after system prompt
-		s.messages = []openai.ChatCompletionMessage{
-			s.messages[0],
-			{
-				Role:    openai.ChatMessageRoleSystem,
-				Content: contextMsg,
-			},
-		}
+	// Merge system prompt + finding context into a single system message
+	// Many non-OpenAI APIs reject multiple system messages
+	mergedSystem := s.systemPrompt + "\n\n" + contextMsg
+
+	// Reset to single system message + clear conversation history
+	s.messages = []openai.ChatCompletionMessage{
+		{Role: openai.ChatMessageRoleSystem, Content: mergedSystem},
 	}
 
 	return nil
@@ -133,6 +149,208 @@ func (s *ChatSession) Send(ctx context.Context, userMsg string) (*ChatResponse, 
 	return parseChatResponse(content)
 }
 
+// SendStream sends a user message and streams the response token by token.
+// onToken is called for each token. If streaming fails, it transparently falls back
+// to a non-streaming request and delivers the full response at once via onToken.
+func (s *ChatSession) SendStream(ctx context.Context, userMsg string, onToken func(token string)) (*ChatResponse, error) {
+	s.messages = append(s.messages, openai.ChatCompletionMessage{
+		Role:    openai.ChatMessageRoleUser,
+		Content: userMsg,
+	})
+
+	mdl := s.cfg.Model
+	if mdl == "" {
+		mdl = "gpt-4o"
+	}
+
+	// Try streaming first
+	content, err := s.tryStream(ctx, mdl, onToken)
+	if err != nil {
+		// Streaming failed — fall back to non-streaming
+		// Remove the user message (Send will re-add it)
+		s.messages = s.messages[:len(s.messages)-1]
+
+		// Signal frontend to discard partial content
+		if onToken != nil {
+			onToken("\x00__RESET__")
+		}
+
+		return s.sendNonStream(ctx, userMsg, onToken)
+	}
+
+	// Add to conversation history
+	s.messages = append(s.messages, openai.ChatCompletionMessage{
+		Role:    openai.ChatMessageRoleAssistant,
+		Content: content,
+	})
+
+	return parseChatResponse(content)
+}
+
+// tryStream attempts a streaming request. Returns the full content or an error.
+func (s *ChatSession) tryStream(ctx context.Context, mdl string, onToken func(token string)) (string, error) {
+	req := openai.ChatCompletionRequest{
+		Model:       mdl,
+		Temperature: float32(s.cfg.Temperature),
+		Messages:    s.messages,
+		Stream:      true,
+	}
+
+	stream, err := s.client.CreateChatCompletionStream(ctx, req)
+	if err != nil {
+		return "", err
+	}
+	defer stream.Close()
+
+	var fullContent strings.Builder
+	for {
+		resp, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			// Got partial content but stream broke — return error so we fall back
+			return "", fmt.Errorf("stream interrupted: %w", err)
+		}
+		if len(resp.Choices) > 0 {
+			token := resp.Choices[0].Delta.Content
+			if token != "" {
+				fullContent.WriteString(token)
+				if onToken != nil {
+					onToken(token)
+				}
+			}
+		}
+	}
+
+	content := fullContent.String()
+	if content == "" {
+		return "", fmt.Errorf("empty stream response")
+	}
+	return content, nil
+}
+
+// sendNonStream does a regular (non-streaming) request and delivers the result via onToken.
+func (s *ChatSession) sendNonStream(ctx context.Context, userMsg string, onToken func(token string)) (*ChatResponse, error) {
+	resp, err := s.Send(ctx, userMsg)
+	if err != nil {
+		return nil, err
+	}
+	// Deliver the full message as a single "token" so the frontend shows it
+	if onToken != nil && resp.Message != "" {
+		onToken(resp.Message)
+	}
+	return resp, nil
+}
+
+// SendPlainStream streams the LLM response directly as plain markdown text.
+// Returns the full response text (not parsed as JSON). Used by the web UI.
+func (s *ChatSession) SendPlainStream(ctx context.Context, userMsg string, onToken func(token string)) (string, error) {
+	s.messages = append(s.messages, openai.ChatCompletionMessage{
+		Role:    openai.ChatMessageRoleUser,
+		Content: userMsg,
+	})
+
+	mdl := s.cfg.Model
+	if mdl == "" {
+		mdl = "gpt-4o"
+	}
+
+	req := openai.ChatCompletionRequest{
+		Model:       mdl,
+		Temperature: float32(s.cfg.Temperature),
+		Messages:    s.messages,
+		Stream:      true,
+	}
+
+	stream, err := s.client.CreateChatCompletionStream(ctx, req)
+	if err != nil {
+		// Streaming not supported — fall back to non-streaming
+		s.messages = s.messages[:len(s.messages)-1]
+		return s.sendPlainNonStream(ctx, userMsg, onToken)
+	}
+	defer stream.Close()
+
+	var fullContent strings.Builder
+	for {
+		resp, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			if fullContent.Len() > 0 {
+				break // use what we have
+			}
+			// Fall back to non-streaming
+			s.messages = s.messages[:len(s.messages)-1]
+			return s.sendPlainNonStream(ctx, userMsg, onToken)
+		}
+		if len(resp.Choices) > 0 {
+			token := resp.Choices[0].Delta.Content
+			if token != "" {
+				fullContent.WriteString(token)
+				if onToken != nil {
+					onToken(token)
+				}
+			}
+		}
+	}
+
+	content := fullContent.String()
+
+	// Add to conversation history
+	s.messages = append(s.messages, openai.ChatCompletionMessage{
+		Role:    openai.ChatMessageRoleAssistant,
+		Content: content,
+	})
+
+	return content, nil
+}
+
+// sendPlainNonStream is the fallback for SendPlainStream.
+func (s *ChatSession) sendPlainNonStream(ctx context.Context, userMsg string, onToken func(token string)) (string, error) {
+	s.messages = append(s.messages, openai.ChatCompletionMessage{
+		Role:    openai.ChatMessageRoleUser,
+		Content: userMsg,
+	})
+
+	mdl := s.cfg.Model
+	if mdl == "" {
+		mdl = "gpt-4o"
+	}
+
+	req := openai.ChatCompletionRequest{
+		Model:       mdl,
+		Temperature: float32(s.cfg.Temperature),
+		Messages:    s.messages,
+	}
+
+	resp, err := s.client.CreateChatCompletion(ctx, req)
+	if err != nil {
+		s.messages = s.messages[:len(s.messages)-1]
+		return "", fmt.Errorf("API error: %w", err)
+	}
+
+	if len(resp.Choices) == 0 {
+		s.messages = s.messages[:len(s.messages)-1]
+		return "", fmt.Errorf("no response from API")
+	}
+
+	content := resp.Choices[0].Message.Content
+	content = stripThinkingTags(content)
+
+	s.messages = append(s.messages, openai.ChatCompletionMessage{
+		Role:    openai.ChatMessageRoleAssistant,
+		Content: content,
+	})
+
+	if onToken != nil && content != "" {
+		onToken(content)
+	}
+
+	return content, nil
+}
+
 // ApplyFix writes the fixed content to the file.
 func ApplyFix(filePath string, fixedContent string) error {
 	info, err := os.Stat(filePath)
@@ -145,20 +363,43 @@ func ApplyFix(filePath string, fixedContent string) error {
 func buildChatSystemPrompt(cfg model.AgentConfig) string {
 	var sb strings.Builder
 
-	sb.WriteString(`You are a senior software engineer helping with interactive code review.
-You are in a conversation with a developer who is reviewing code findings (issues found in their code).
+	sb.WriteString(`You are an expert code review assistant. You help developers understand and resolve code findings through focused, structured dialogue.
 
-For each message, you MUST respond with a JSON object:
-{
-  "message": "Your response text here (use \n for newlines)",
-  "action": "none",
-  "fixed_content": "",
-  "target": "current"
-}
+## CRITICAL: Response format
+
+You MUST ALWAYS respond with ONLY a valid JSON object. No other text, no code blocks wrapping it, no explanation outside the JSON. Your entire response must be parseable JSON.
+
+The JSON object:
+{"message": "Your response (Markdown formatted)", "action": "none", "fixed_content": "", "target": "current"}
+
+NEVER echo back source code from the file context as your raw response. NEVER respond with Go/Python/JS code outside the JSON structure. ALL your text must be inside the "message" field as a string.
+
+## Response style rules (CRITICAL)
+
+Your "message" MUST follow these rules strictly:
+
+1. **Be concise** — Get to the point immediately. No greetings, no filler, no "Sure!", no "Great question!". Start directly with the answer.
+2. **Use structured Markdown** — Always organize your response with:
+   - **Bold headers** for sections
+   - Bullet points for lists
+   - ` + "`code`" + ` for inline code references
+   - Code blocks with language tags for examples
+3. **Key points first** — Lead with the most important information. Use this structure:
+   - **Problem**: What's wrong (1-2 sentences max)
+   - **Impact**: Why it matters (1 sentence)
+   - **Fix**: How to resolve it (concrete, actionable)
+4. **No repetition** — Never restate what the user said. Never repeat the finding description they can already see.
+5. **No filler** — Remove words like "basically", "essentially", "in order to", "it's worth noting". Every sentence must carry information.
+6. **Show, don't tell** — Prefer a code example over a paragraph of explanation. A 3-line code snippet is better than 3 paragraphs.
+7. **One concept per response** — Don't dump everything at once. Answer what was asked, nothing more.
+
+### Bad response example:
+"Sure! That's a great question. So basically, the issue here is that you have a potential null pointer dereference. This means that when the variable is null, accessing its properties could cause a runtime error. To fix this, you could add a null check before accessing the property. Here's how you might do it..."
+
+### Good response example:
+"**Problem**: ` + "`user.Profile`" + ` can be ` + "`nil`" + ` when the account is newly created.\n\n**Fix**:\n` + "```" + `go\nif user.Profile != nil {\n    name = user.Profile.Name\n}\n` + "```" + `\n\nThis prevents the nil pointer panic on line 42."
 
 ## Available actions
-
-The "action" field controls what happens after your response:
 
 | action     | effect                                          |
 |------------|-------------------------------------------------|
@@ -169,9 +410,7 @@ The "action" field controls what happens after your response:
 | "next"     | Navigate to the next finding                    |
 | "prev"     | Navigate to the previous finding                |
 
-## Target scope
-
-The "target" field controls which findings are affected (for fix/dismiss/accept):
+## Target scope (for fix/dismiss/accept)
 
 | target     | scope                                |
 |------------|--------------------------------------|
@@ -181,46 +420,64 @@ The "target" field controls which findings are affected (for fix/dismiss/accept)
 | "warnings" | All pending findings with severity=warn  |
 | "infos"    | All pending findings with severity=info  |
 
-Examples:
-- User says "dismiss all info findings" → action:"dismiss", target:"infos"
-- User says "accept everything" → action:"accept", target:"all"
-- User says "fix this" → action:"fix", target:"current"
-- User says "go to the next one" → action:"next", target:"current"
-- User says "skip" → action:"next", target:"current"
-
 ## Fixing code
 
-When the user asks you to fix something:
-1. Set action to "fix"
-2. Set fixed_content to the COMPLETE file content with the fix applied
-3. In message, briefly explain what you changed
+When fixing:
+1. Set action to "fix", fixed_content to the COMPLETE file with the fix applied
+2. In message, briefly explain the change (2-3 sentences max, with a code diff snippet)
+3. Fix ONLY the specific issue — do NOT change formatting, style, or unrelated code
+4. Preserve all existing whitespace and line endings
+5. If you cannot fix it, set action to "none" and explain why in 1-2 sentences
 
-Rules for fixing:
-- Fix ONLY the specific issue discussed
-- Do NOT change any other code, formatting, or style
-- Preserve all existing whitespace, indentation, and line endings
-- The fixed_content must be the complete file, not a snippet
-- If you cannot fix the issue, set action to "none" and explain why
+## Intent recognition
 
-## Capabilities
-
-You can help the developer by:
-- Fixing code issues (set action:"fix")
-- Explaining why an issue is a problem
-- Suggesting alternative approaches or best practices
-- Answering questions about the code
-- Navigating between findings (action:"next"/"prev")
-- Batch-processing findings (action:"dismiss"/"accept" with target:"all"/"errors"/etc.)
-- Discussing trade-offs of different fix approaches
-- Providing code examples in your message
-
-Be concise and helpful. Understand the user's intent — if they say "ok" or "looks good", that likely means accept. If they say "not a problem" or "ignore", that means dismiss. If they say "next" or "skip", navigate forward.
+Understand the user's intent from short messages:
+- "ok" / "looks good" / "agree" → action:"accept"
+- "not a problem" / "ignore" / "skip this" → action:"dismiss"
+- "fix" / "fix this" / "fix it" → action:"fix"
+- "next" / "skip" / "move on" → action:"next"
+- "dismiss all info" → action:"dismiss", target:"infos"
+- "accept everything" → action:"accept", target:"all"
 `)
 
 	lang := cfg.Language
 	if lang != "" && lang != "en" {
 		langName := expandLanguageCode(lang)
 		sb.WriteString(fmt.Sprintf("\nIMPORTANT: Write all \"message\" text in %s (%s). Keep JSON keys and action values in English.\n", langName, lang))
+	}
+
+	return sb.String()
+}
+
+func buildPlainChatSystemPrompt(cfg model.AgentConfig) string {
+	var sb strings.Builder
+
+	sb.WriteString(`You are an expert code review assistant. You help developers understand and resolve code findings through focused, structured dialogue.
+
+## Response rules (CRITICAL)
+
+Respond in **plain Markdown**. Do NOT wrap your response in JSON, code blocks, or any other structure. Just write your answer directly.
+
+1. **Be concise** — Get to the point. No greetings, no filler ("Sure!", "Great question!"). Start with the answer.
+2. **Structured Markdown** — Use:
+   - **Bold** for key terms
+   - Bullet points for lists
+   - ` + "`code`" + ` for inline references
+   - Fenced code blocks (with language tag) for examples
+3. **Key points first** — Structure as:
+   - **Problem**: What's wrong (1-2 sentences)
+   - **Impact**: Why it matters (1 sentence)
+   - **Fix**: How to resolve it (code example preferred)
+4. **No repetition** — Don't restate the finding or what the user said.
+5. **Show, don't tell** — A 3-line code snippet beats 3 paragraphs.
+6. **One concept per response** — Answer what was asked, nothing more.
+7. **Never dump the entire file** — Only show relevant snippets.
+`)
+
+	lang := cfg.Language
+	if lang != "" && lang != "en" {
+		langName := expandLanguageCode(lang)
+		sb.WriteString(fmt.Sprintf("\nIMPORTANT: Respond in %s (%s).\n", langName, lang))
 	}
 
 	return sb.String()
@@ -255,11 +512,21 @@ func parseChatResponse(content string) (*ChatResponse, error) {
 
 	var resp ChatResponse
 	if err := json.Unmarshal([]byte(content), &resp); err != nil {
-		// If JSON parsing fails, treat the whole response as a plain message
+		// JSON parsing failed — the LLM didn't follow instructions.
+		// Truncate overly long raw responses (likely echoed source code).
+		msg := content
+		if len(msg) > 500 {
+			msg = msg[:500] + "\n\n*(response truncated — AI returned invalid format)*"
+		}
 		return &ChatResponse{
-			Message: content,
+			Message: msg,
 			Action:  "none",
 		}, nil
+	}
+
+	// Sanity check: if message is empty but we got content, use content
+	if resp.Message == "" && content != "" {
+		resp.Message = "(AI returned empty message)"
 	}
 
 	return &resp, nil

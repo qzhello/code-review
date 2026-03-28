@@ -32,13 +32,20 @@ func NewFixer(cfg model.AgentConfig) (*Fixer, error) {
 	return &Fixer{client: client, cfg: cfg}, nil
 }
 
-// Fix reads the source file, asks the LLM to fix the finding, and writes the result back.
-// Returns an explanation of the fix, or an error.
-func (f *Fixer) Fix(ctx context.Context, finding model.Finding) (string, error) {
-	// Read the source file
+// FixProposal holds a proposed fix that has not been applied yet.
+type FixProposal struct {
+	FilePath     string
+	Original     string // original file content
+	FixedContent string // proposed file content
+	Explanation  string
+}
+
+// Propose reads the source file, asks the LLM to generate a fix, and returns the proposal
+// without writing anything to disk.
+func (f *Fixer) Propose(ctx context.Context, finding model.Finding) (*FixProposal, error) {
 	content, err := os.ReadFile(finding.FilePath)
 	if err != nil {
-		return "", fmt.Errorf("failed to read file %s: %w", finding.FilePath, err)
+		return nil, fmt.Errorf("failed to read file %s: %w", finding.FilePath, err)
 	}
 
 	systemPrompt := buildFixSystemPrompt(f.cfg)
@@ -46,28 +53,29 @@ func (f *Fixer) Fix(ctx context.Context, finding model.Finding) (string, error) 
 
 	result, err := f.client.ChatCompletion(ctx, systemPrompt, userMsg)
 	if err != nil {
-		return "", fmt.Errorf("fix generation failed: %w", err)
+		return nil, fmt.Errorf("fix generation failed: %w", err)
 	}
 
 	resp, err := parseFixResponse(result.Content)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	if resp.FixedContent == "" {
-		return "", fmt.Errorf("LLM returned empty fix")
+		return nil, fmt.Errorf("LLM returned empty fix")
 	}
 
-	// Write the fixed content back to the file
-	info, err := os.Stat(finding.FilePath)
-	if err != nil {
-		return "", fmt.Errorf("failed to stat file %s: %w", finding.FilePath, err)
-	}
-	if err := os.WriteFile(finding.FilePath, []byte(resp.FixedContent), info.Mode()); err != nil {
-		return "", fmt.Errorf("failed to write fixed file %s: %w", finding.FilePath, err)
-	}
+	return &FixProposal{
+		FilePath:     finding.FilePath,
+		Original:     string(content),
+		FixedContent: resp.FixedContent,
+		Explanation:  resp.Explanation,
+	}, nil
+}
 
-	return resp.Explanation, nil
+// Apply writes a fix proposal to disk.
+func (p *FixProposal) Apply() error {
+	return ApplyFix(p.FilePath, p.FixedContent)
 }
 
 func buildFixSystemPrompt(cfg model.AgentConfig) string {
