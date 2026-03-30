@@ -1,5 +1,5 @@
 BINARY := cr
-VERSION := 1.0.0
+VERSION := 1.0.1
 GO := CGO_ENABLED=1 go
 LDFLAGS := -ldflags "-s -w -X main.version=$(VERSION)"
 LDFLAGS_MUSL := -ldflags "-s -w -X main.version=$(VERSION) -linkmode external -extldflags '-static'"

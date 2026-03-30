@@ -17,7 +17,7 @@ const path = require("path");
 const { execSync } = require("child_process");
 const os = require("os");
 
-const VERSION = "1.0.0";
+const VERSION = "1.0.1";
 const BINARY_NAME = process.platform === "win32" ? "cr.exe" : "cr";
 const BIN_DIR = path.join(__dirname, "bin");
 const BINARY_PATH = path.join(BIN_DIR, BINARY_NAME);
